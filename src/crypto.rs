@@ -1,10 +1,11 @@
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
-use ml_kem::{decapsulate, encapsulate, keypair, Ciphertext, PublicKey, SecretKey, SharedSecret};
+use ml_kem::{MlKem1024, Ciphertext, EncodedSizeUser, KemCore};
+use ml_kem::kem::{Decapsulate, Encapsulate};
 use pqcrypto_dilithium::dilithium3 as dilithium;
 use pqcrypto_traits::sign::{
-    DetachedSignature, PublicKey as SigPublicKey, SecretKey as SigSecretKey,
+    DetachedSignature, PublicKey as SigPublicKey,
 };
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -17,7 +18,7 @@ use crate::types::*;
 /// Recipient private (ML-KEM) holder
 pub struct RecipientPriv {
     pub kid: String,
-    pub sk_kyber: SecretKey, // ML-KEM secret key
+    pub sk_kyber: <MlKem1024 as KemCore>::DecapsulationKey, // ML-KEM secret key
 }
 
 /// Sender keypair (Dilithium-3)
@@ -30,7 +31,8 @@ pub struct SenderKeypair {
 /* ---------------- Keygen ---------------- */
 
 pub fn gen_recipient_keypair(kid: &str) -> (RecipientPub, RecipientPriv) {
-    let (pk, sk) = keypair(); // ML-KEM (Kyber) pure-Rust
+    let mut rng = OsRng;
+    let (sk, pk) = MlKem1024::generate(&mut rng); // ML-KEM (Kyber) pure-Rust
     let pub_bytes = pk.as_bytes().to_vec();
     (
         RecipientPub {
@@ -62,9 +64,9 @@ pub fn sender_pub(sender: &SenderKeypair) -> SenderPub {
 
 /* ---------------- Symmetric helpers ---------------- */
 
-fn hkdf32(shared: &SharedSecret, kid: &str, header_cbor: &[u8]) -> [u8; 32] {
+fn hkdf32(shared: &[u8], kid: &str, header_cbor: &[u8]) -> [u8; 32] {
     // Domain separation with recipient kid + canonical header CBOR as info
-    let hk = Hkdf::<Sha256>::new(Some(kid.as_bytes()), shared.as_bytes());
+    let hk = Hkdf::<Sha256>::new(Some(kid.as_bytes()), shared);
     let mut okm = [0u8; 32];
     hk.expand(header_cbor, &mut okm).expect("HKDF expand");
     okm
@@ -133,11 +135,11 @@ pub fn encrypt(
     // Envelopes (one per recipient)
     let mut envs = Vec::with_capacity(recipients.len());
     for r in recipients {
-        let pk =
-            PublicKey::from_bytes(&r.pk_kyber).map_err(|_| TholosError::Malformed("ml-kem pk"))?;
-        let (kem_ct, shared) = encapsulate(&pk);
+        let pk_bytes: &[u8] = &r.pk_kyber;
+        let pk = <MlKem1024 as KemCore>::EncapsulationKey::from_bytes(&pk_bytes.try_into().map_err(|_| TholosError::Malformed("ml-kem pk"))?);
+        let (kem_ct, shared) = pk.encapsulate(&mut rng).map_err(|_| TholosError::Malformed("encapsulation"))?;
 
-        let kek = hkdf32(&shared, &r.kid, &header_cbor);
+        let kek = hkdf32(shared.as_slice(), &r.kid, &header_cbor);
 
         let mut wrap_nonce = [0u8; 24];
         rng.fill_bytes(&mut wrap_nonce);
@@ -145,7 +147,7 @@ pub fn encrypt(
 
         envs.push(RecipientEnvelope {
             kid: r.kid.clone(),
-            kem_ct: kem_ct.as_bytes().to_vec(),
+            kem_ct: kem_ct.as_slice().to_vec(),
             wrap_nonce: wrap_nonce.to_vec(),
             wrapped_cek,
         });
@@ -160,7 +162,7 @@ pub fn encrypt(
 
     // Sign canonical CBOR of inner
     let inner_cbor = to_cbor_canonical(&inner)?;
-    let sig = dilithium::sign_detached(&inner_cbor, &sender.sk_dilithium);
+    let sig = dilithium::detached_sign(&inner_cbor, &sender.sk_dilithium);
 
     let bundle = BundleSigned {
         inner,
@@ -178,7 +180,7 @@ pub fn encrypt(
 pub fn decrypt(
     wire_cbor: &[u8],
     my_kid: &str,
-    my_sk: &SecretKey,
+    my_sk: &<MlKem1024 as KemCore>::DecapsulationKey,
     allowed_senders: &[(String, Vec<u8>)],
 ) -> Result<Vec<u8>, TholosError> {
     let bundle: BundleSigned = crate::types::from_cbor(wire_cbor)?;
@@ -208,12 +210,12 @@ pub fn decrypt(
     if env.wrap_nonce.len() != 24 {
         return Err(TholosError::Malformed("wrap nonce"));
     }
-    let kem_ct =
-        Ciphertext::from_bytes(&env.kem_ct).map_err(|_| TholosError::Malformed("kem_ct"))?;
-    let shared = decapsulate(&kem_ct, my_sk);
+    let kem_ct_bytes: &[u8] = &env.kem_ct;
+    let kem_ct: Ciphertext<MlKem1024> = kem_ct_bytes.try_into().map_err(|_| TholosError::Malformed("kem_ct"))?;
+    let shared = my_sk.decapsulate(&kem_ct).map_err(|_| TholosError::Malformed("decapsulation"))?;
 
     let header_cbor = crate::types::to_cbor_canonical(&bundle.inner.header)?;
-    let kek = hkdf32(&shared, my_kid, &header_cbor);
+    let kek = hkdf32(shared.as_slice(), my_kid, &header_cbor);
 
     // Unwrap CEK
     let mut wrap_nonce = [0u8; 24];

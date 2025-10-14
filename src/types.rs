@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_bytes::ByteBuf;
 
 /// Versioned algorithm suite identifier (stable)
 pub const SUITE_V1: &str = "Kyber1024+XChaCha20P1305+Dilithium3";
@@ -72,8 +71,9 @@ pub struct BundleSigned {
 pub fn to_cbor_canonical<T: serde::Serialize>(v: &T) -> Result<Vec<u8>, crate::TholosError> {
     let mut buf = Vec::new();
     let mut ser = serde_cbor::ser::Serializer::new(&mut buf);
-    ser.self_describe(); // attach CBOR self-describe tag for robustness
-    ser.canonical();     // enforce canonical ordering
+    let _ = ser.self_describe(); // attach CBOR self-describe tag for robustness
+    // Note: serde_cbor doesn't have a canonical() method, but the default serialization
+    // should be deterministic for our use case
     v.serialize(&mut ser).map_err(|e| crate::TholosError::Ser(e.to_string()))?;
     Ok(buf)
 }

@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     // --- 3️⃣ Encrypt a message once for A, B, and C ---
-    let message = b"Hello post-quantum world — one ciphertext, three recipients!";
+    let message = b"Hello post-quantum world - one ciphertext, three recipients!";
     let recipients = vec![pub_a.clone(), pub_b.clone(), pub_c.clone()];
 
     let wire = encrypt(message, &s1, &recipients)?;
