@@ -1,0 +1,27 @@
+[package]
+name = "tholos-pq"
+version = "0.1.0"
+edition = "2021"
+description = "Pure post-quantum multi-recipient encryption: Kyber-1024 + Dilithium-3 + XChaCha20-Poly1305 with a stable, versioned wire format"
+license = "Apache-2.0"
+repository = "https://github.com/your-org/tholos-pq"
+
+
+[dependencies]
+# Common deps (unchanged)
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_cbor = "0.11"
+serde_bytes = "0.11"
+uuid = { version = "1.10", features = ["v4"] }
+sha2 = "0.10"
+hkdf = "0.12"
+thiserror = "1.0"
+time = { version = "0.3", features = ["std"] }
+chacha20poly1305 = "0.10.1"
+pqcrypto-traits = "0.3"
+
+# Pure-Rust ML-KEM (Kyber) implementation
+ml-kem = "0.2"     # RustCrypto’s post-quantum KEM crate
+pqcrypto-dilithium = { version = "0.5", features = ["neon"], default-features = false }
+
