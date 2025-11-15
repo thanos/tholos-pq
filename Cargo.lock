@@ -698,7 +698,7 @@ dependencies = [
 
 [[package]]
 name = "tholos-pq"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chacha20poly1305",
  "hkdf",
