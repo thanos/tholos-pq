@@ -1,3 +1,5 @@
+//! Cryptographic operations for encryption, decryption, and key generation.
+
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
@@ -15,21 +17,55 @@ use time::OffsetDateTime;
 use crate::errors::TholosError;
 use crate::types::*;
 
-/// Recipient private (ML-KEM) holder
+/// Recipient private key material.
+///
+/// This structure holds the ML-KEM-1024 decapsulation key needed to decrypt
+/// messages addressed to the recipient.
 pub struct RecipientPriv {
+    /// Recipient identifier.
     pub kid: String,
-    pub sk_kyber: <MlKem1024 as KemCore>::DecapsulationKey, // ML-KEM secret key
+    /// ML-KEM-1024 decapsulation (secret) key.
+    pub sk_kyber: <MlKem1024 as KemCore>::DecapsulationKey,
 }
 
-/// Sender keypair (Dilithium-3)
+/// Sender keypair for signing messages.
+///
+/// This structure holds both the public and private Dilithium-3 keys needed
+/// to sign and verify messages.
 pub struct SenderKeypair {
+    /// Sender identifier.
     pub sid: String,
+    /// Dilithium-3 public key.
     pub pk_dilithium: dilithium::PublicKey,
+    /// Dilithium-3 secret key.
     pub sk_dilithium: dilithium::SecretKey,
 }
 
-/* ---------------- Keygen ---------------- */
+// ============================================================================
+// Key Generation
+// ============================================================================
 
+/// Generate a new recipient keypair.
+///
+/// This function generates a fresh ML-KEM-1024 keypair for a recipient.
+/// The keypair consists of a public key (for encryption) and a private key
+/// (for decryption).
+///
+/// # Arguments
+///
+/// * `kid` - Recipient identifier (e.g., "alice", "bob@example.com")
+///
+/// # Returns
+///
+/// A tuple containing the public key (`RecipientPub`) and private key (`RecipientPriv`).
+///
+/// # Example
+///
+/// ```rust
+/// use tholos_pq::gen_recipient_keypair;
+///
+/// let (pub_key, priv_key) = gen_recipient_keypair("alice");
+/// ```
 pub fn gen_recipient_keypair(kid: &str) -> (RecipientPub, RecipientPriv) {
     let mut rng = OsRng;
     let (sk, pk) = MlKem1024::generate(&mut rng); // ML-KEM (Kyber) pure-Rust
@@ -46,6 +82,27 @@ pub fn gen_recipient_keypair(kid: &str) -> (RecipientPub, RecipientPriv) {
     )
 }
 
+/// Generate a new sender keypair.
+///
+/// This function generates a fresh Dilithium-3 keypair for a sender.
+/// The keypair consists of a public key (for signature verification) and a
+/// private key (for signing).
+///
+/// # Arguments
+///
+/// * `sid` - Sender identifier (e.g., "server1", "alice@example.com")
+///
+/// # Returns
+///
+/// A `SenderKeypair` containing both public and private keys.
+///
+/// # Example
+///
+/// ```rust
+/// use tholos_pq::gen_sender_keypair;
+///
+/// let sender = gen_sender_keypair("server1");
+/// ```
 pub fn gen_sender_keypair(sid: &str) -> SenderKeypair {
     let (pk, sk) = dilithium::keypair();
     SenderKeypair {
@@ -55,6 +112,28 @@ pub fn gen_sender_keypair(sid: &str) -> SenderKeypair {
     }
 }
 
+/// Extract the public key information from a sender keypair.
+///
+/// This function converts a `SenderKeypair` into a `SenderPub` structure
+/// that can be shared with recipients for signature verification.
+///
+/// # Arguments
+///
+/// * `sender` - The sender keypair
+///
+/// # Returns
+///
+/// A `SenderPub` structure containing the sender ID and public key bytes.
+///
+/// # Example
+///
+/// ```rust
+/// use tholos_pq::{gen_sender_keypair, sender_pub};
+///
+/// let sender = gen_sender_keypair("server1");
+/// let pub_info = sender_pub(&sender);
+/// // Share pub_info.pk_dilithium with recipients
+/// ```
 pub fn sender_pub(sender: &SenderKeypair) -> SenderPub {
     SenderPub {
         sid: sender.sid.clone(),
@@ -104,10 +183,50 @@ fn aead_dec(
         .map_err(|_| TholosError::Aead)
 }
 
-/* ---------------- Encrypt ---------------- */
+// ============================================================================
+// Encryption
+// ============================================================================
 
-/// Encrypt once for N recipients (ML-KEM per recipient CEK wrap) and sign with Dilithium-3.
-/// Returns **canonical CBOR** wire bytes of `BundleSigned`.
+/// Encrypt a message for multiple recipients and sign it with the sender's key.
+///
+/// This function performs the following operations:
+/// 1. Generates a random content encryption key (CEK)
+/// 2. Encrypts the plaintext using XChaCha20-Poly1305 with the CEK
+/// 3. For each recipient, performs ML-KEM key encapsulation and wraps the CEK
+/// 4. Signs the bundle with Dilithium-3
+/// 5. Serializes the result to canonical CBOR
+///
+/// # Arguments
+///
+/// * `plaintext` - The message to encrypt
+/// * `sender` - The sender's keypair for signing
+/// * `recipients` - Slice of recipient public keys
+///
+/// # Returns
+///
+/// The canonical CBOR-encoded wire format bytes, or an error if encryption fails.
+///
+/// # Errors
+///
+/// Returns `TholosError` if:
+/// - Key encapsulation fails
+/// - AEAD encryption fails
+/// - CBOR serialization fails
+///
+/// # Example
+///
+/// ```rust
+/// use tholos_pq::*;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let sender = gen_sender_keypair("alice");
+/// let (pub_key, _) = gen_recipient_keypair("bob");
+///
+/// let message = b"Hello, world!";
+/// let wire = encrypt(message, &sender, &[pub_key])?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn encrypt(
     plaintext: &[u8],
     sender: &SenderKeypair,
@@ -175,10 +294,58 @@ pub fn encrypt(
     to_cbor_canonical(&bundle)
 }
 
-/* ---------------- Decrypt ---------------- */
+// ============================================================================
+// Decryption
+// ============================================================================
 
-/// Decrypt as recipient using your ML-KEM secret key, verifying Dilithium-3 signature
-/// against the provided allowed sender list.
+/// Decrypt a message as a recipient and verify the sender's signature.
+///
+/// This function performs the following operations:
+/// 1. Deserializes the wire format from CBOR
+/// 2. Verifies the sender is in the allowed list
+/// 3. Verifies the Dilithium-3 signature
+/// 4. Finds the recipient's envelope
+/// 5. Decapsulates the ML-KEM ciphertext to recover the KEK
+/// 6. Unwraps the CEK using the KEK
+/// 7. Decrypts the payload using the CEK
+///
+/// # Arguments
+///
+/// * `wire_cbor` - The CBOR-encoded wire format bytes
+/// * `my_kid` - The recipient's identifier (must match one in the message)
+/// * `my_sk` - The recipient's ML-KEM decapsulation key
+/// * `allowed_senders` - List of (sender_id, public_key_bytes) pairs for signature verification
+///
+/// # Returns
+///
+/// The decrypted plaintext, or an error if decryption or verification fails.
+///
+/// # Errors
+///
+/// Returns `TholosError` if:
+/// - The sender is not in the allowed list (`BadSignature`)
+/// - Signature verification fails (`BadSignature`)
+/// - No envelope is found for the recipient (`MissingEnvelope`)
+/// - ML-KEM decapsulation fails (`Malformed`)
+/// - AEAD decryption fails (`Aead`)
+/// - CBOR deserialization fails (`Ser`)
+///
+/// # Example
+///
+/// ```rust
+/// use tholos_pq::*;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let sender = gen_sender_keypair("alice");
+/// let (pub_key, priv_key) = gen_recipient_keypair("bob");
+/// let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
+///
+/// let wire = encrypt(b"Hello", &sender, &[pub_key.clone()])?;
+/// let plaintext = decrypt(&wire, "bob", &priv_key.sk_kyber, &allowed)?;
+/// assert_eq!(plaintext, b"Hello");
+/// # Ok(())
+/// # }
+/// ```
 pub fn decrypt(
     wire_cbor: &[u8],
     my_kid: &str,
