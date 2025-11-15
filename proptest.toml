@@ -1,0 +1,18 @@
+# Proptest configuration
+# See https://docs.rs/proptest/latest/proptest/#configuration
+
+# Default number of test cases to generate
+test.cases = 256
+
+# Maximum number of local rejections before giving up
+test.max-local-rejects = 65536
+
+# Maximum number of global rejections before giving up
+test.max-global-rejects = 1024
+
+# Maximum number of shrink attempts
+test.max-shrink-iterations = 65536
+
+# Maximum number of shrink attempts per value
+test.max-shrink-time = 65536
+

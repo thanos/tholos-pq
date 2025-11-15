@@ -25,6 +25,9 @@ pqcrypto-traits = "0.3"
 ml-kem = "0.2"     # RustCrypto's post-quantum KEM crate
 pqcrypto-dilithium = { version = "0.5", features = ["neon"], default-features = false }
 
+[dev-dependencies]
+proptest = "1.5"
+
 [lints.rust]
 # Rust lints
 unsafe_code = "warn"
