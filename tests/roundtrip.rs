@@ -32,7 +32,7 @@ fn signature_rejection() {
     // Only S2 allowed → S1's bundle must be rejected
     let allowed = vec![(s2.sid.clone(), sender_pub(&s2).pk_dilithium)];
 
-    let wire = encrypt(b"nope", &s1, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"nope", &s1, std::slice::from_ref(&pub_a)).unwrap();
     let err = decrypt(&wire, "A", &priv_a.sk_kyber, &allowed).unwrap_err();
     matches!(err, TholosError::BadSignature);
 }
