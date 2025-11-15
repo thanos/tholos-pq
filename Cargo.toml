@@ -22,6 +22,30 @@ chacha20poly1305 = "0.10.1"
 pqcrypto-traits = "0.3"
 
 # Pure-Rust ML-KEM (Kyber) implementation
-ml-kem = "0.2"     # RustCrypto’s post-quantum KEM crate
+ml-kem = "0.2"     # RustCrypto's post-quantum KEM crate
 pqcrypto-dilithium = { version = "0.5", features = ["neon"], default-features = false }
 
+[lints.rust]
+# Rust lints
+unsafe_code = "warn"
+# Note: missing_docs can be enabled but may be too strict for development
+# missing_docs = "warn"
+
+[lints.clippy]
+# Clippy configuration
+# Set to "warn" to allow but warn, or "deny" to forbid
+cognitive_complexity = "warn"
+too_many_arguments = "warn"
+too_many_lines = "warn"
+type_complexity = "warn"
+# Security-focused lints
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+# Code quality
+unnecessary_cast = "warn"
+unnecessary_wraps = "warn"
+single_char_pattern = "warn"
+# Allow some common patterns
+many_single_char_names = "allow"  # Common in crypto code (k, r, pk, sk, etc.)
+module_name_repetitions = "allow"  # Common in Rust modules
