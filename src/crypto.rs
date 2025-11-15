@@ -147,7 +147,8 @@ fn hkdf32(shared: &[u8], kid: &str, header_cbor: &[u8]) -> [u8; 32] {
     // Domain separation with recipient kid + canonical header CBOR as info
     let hk = Hkdf::<Sha256>::new(Some(kid.as_bytes()), shared);
     let mut okm = [0u8; 32];
-    // HKDF expand should never fail with a 32-byte output buffer
+    // HKDF expand with a 32-byte output buffer cannot fail (max output is 255 * hash_len = 8160 bytes for SHA-256)
+    #[allow(clippy::expect_used)]
     hk.expand(header_cbor, &mut okm)
         .expect("HKDF expand failed - this should never happen with 32-byte output");
     okm
@@ -160,9 +161,10 @@ fn aead_enc(
     pt: &[u8],
 ) -> Result<Vec<u8>, TholosError> {
     let cipher = XChaCha20Poly1305::new(key.into());
+    let nonce = XNonce::from(*nonce24);
     cipher
         .encrypt(
-            XNonce::from_slice(nonce24),
+            &nonce,
             chacha20poly1305::aead::Payload { msg: pt, aad },
         )
         .map_err(|_| TholosError::Aead)
@@ -175,9 +177,10 @@ fn aead_dec(
     ct: &[u8],
 ) -> Result<Vec<u8>, TholosError> {
     let cipher = XChaCha20Poly1305::new(key.into());
+    let nonce = XNonce::from(*nonce24);
     cipher
         .decrypt(
-            XNonce::from_slice(nonce24),
+            &nonce,
             chacha20poly1305::aead::Payload { msg: ct, aad },
         )
         .map_err(|_| TholosError::Aead)

@@ -1,12 +1,12 @@
 [package]
 name = "tholos-pq"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Pure post-quantum multi-recipient encryption: Kyber-1024 + Dilithium-3 + XChaCha20-Poly1305 with a stable, versioned wire format"
 license = "Apache-2.0"
 repository = "https://github.com/thanos/tholos-pq"
 authors = ["Thanos Vassilakis <thanosv@gmail.com>"]
-keywords = ["cryptography", "post-quantum", "encryption", "ml-kem", "dilithium", "multi-recipient"]
+keywords = ["cryptography", "post-quantum", "encryption", "dilithium", "multi-recipient"]
 categories = ["cryptography", "encoding"]
 readme = "README.md"
 documentation = "https://docs.rs/tholos-pq"
