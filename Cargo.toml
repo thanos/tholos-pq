@@ -38,7 +38,7 @@ cognitive_complexity = "warn"
 too_many_arguments = "warn"
 too_many_lines = "warn"
 type_complexity = "warn"
-# Security-focused lints
+# Security-focused lints (for library code)
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
@@ -49,3 +49,4 @@ single_char_pattern = "warn"
 # Allow some common patterns
 many_single_char_names = "allow"  # Common in crypto code (k, r, pk, sk, etc.)
 module_name_repetitions = "allow"  # Common in Rust modules
+cloned_ref_to_slice_refs = "warn"  # Warn about single-element clone() in slices

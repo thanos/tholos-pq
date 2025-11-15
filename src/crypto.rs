@@ -68,7 +68,9 @@ fn hkdf32(shared: &[u8], kid: &str, header_cbor: &[u8]) -> [u8; 32] {
     // Domain separation with recipient kid + canonical header CBOR as info
     let hk = Hkdf::<Sha256>::new(Some(kid.as_bytes()), shared);
     let mut okm = [0u8; 32];
-    hk.expand(header_cbor, &mut okm).expect("HKDF expand");
+    // HKDF expand should never fail with a 32-byte output buffer
+    hk.expand(header_cbor, &mut okm)
+        .expect("HKDF expand failed - this should never happen with 32-byte output");
     okm
 }
 

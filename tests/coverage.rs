@@ -1,3 +1,6 @@
+#![allow(clippy::unwrap_used)] // unwrap() is idiomatic in tests
+#![allow(clippy::panic)] // panic!() is acceptable in tests for assertions
+
 use tholos_pq::*;
 use pqcrypto_traits::sign::{PublicKey, DetachedSignature};
 use pqcrypto_dilithium::dilithium3 as dilithium;
@@ -65,7 +68,7 @@ fn test_encrypt_decrypt_single_recipient() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
     let message = b"Hello, single recipient!";
-    let wire = encrypt(message, &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(message, &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     let decrypted = decrypt(&wire, "A", &priv_a.sk_kyber, &allowed).unwrap();
     assert_eq!(decrypted, message);
@@ -78,7 +81,7 @@ fn test_encrypt_decrypt_empty_message() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
     let message = b"";
-    let wire = encrypt(message, &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(message, &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     let decrypted = decrypt(&wire, "A", &priv_a.sk_kyber, &allowed).unwrap();
     assert_eq!(decrypted, message);
@@ -92,7 +95,7 @@ fn test_encrypt_decrypt_large_message() {
     
     // 1MB message
     let message = vec![0x42u8; 1_000_000];
-    let wire = encrypt(&message, &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(&message, &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     let decrypted = decrypt(&wire, "A", &priv_a.sk_kyber, &allowed).unwrap();
     assert_eq!(decrypted, message);
@@ -126,8 +129,8 @@ fn test_encrypt_deterministic_header() {
     let message = b"test message";
     
     // Encrypt same message twice - headers should differ (different UUIDs, timestamps)
-    let wire1 = encrypt(message, &sender, &[pub_a.clone()]).unwrap();
-    let wire2 = encrypt(message, &sender, &[pub_a.clone()]).unwrap();
+    let wire1 = encrypt(message, &sender, std::slice::from_ref(&pub_a)).unwrap();
+    let wire2 = encrypt(message, &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     // Wire formats should be different due to randomness in encryption
     assert_ne!(wire1, wire2);
@@ -145,7 +148,7 @@ fn test_decrypt_wrong_recipient_key() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
     let message = b"secret message";
-    let wire = encrypt(message, &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(message, &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     // B tries to decrypt message intended for A - should fail
     let result = decrypt(&wire, "A", &priv_b.sk_kyber, &allowed);
@@ -159,7 +162,7 @@ fn test_decrypt_missing_envelope() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
     let message = b"secret message";
-    let wire = encrypt(message, &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(message, &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     // Try to decrypt with wrong kid
     let result = decrypt(&wire, "NONEXISTENT", &priv_a.sk_kyber, &allowed);
@@ -176,7 +179,7 @@ fn test_decrypt_invalid_sender() {
     let allowed = vec![(s2.sid.clone(), sender_pub(&s2).pk_dilithium)];
     
     // S1 encrypts a message
-    let wire = encrypt(b"forbidden", &s1, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"forbidden", &s1, std::slice::from_ref(&pub_a)).unwrap();
     
     // Should be rejected
     let result = decrypt(&wire, "A", &priv_a.sk_kyber, &allowed);
@@ -189,7 +192,7 @@ fn test_decrypt_corrupted_signature() {
     let sender = gen_sender_keypair("S1");
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     // Corrupt the signature
     let mut corrupted = wire.clone();
@@ -208,7 +211,7 @@ fn test_decrypt_corrupted_ciphertext() {
     let sender = gen_sender_keypair("S1");
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     // Corrupt the ciphertext (not the signature)
     let mut corrupted = wire.clone();
@@ -240,7 +243,7 @@ fn test_decrypt_empty_allowed_senders() {
     let sender = gen_sender_keypair("S1");
     let allowed = vec![]; // No allowed senders
     
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     let result = decrypt(&wire, "A", &priv_a.sk_kyber, &allowed);
     assert!(matches!(result, Err(TholosError::BadSignature)));
@@ -278,7 +281,7 @@ fn test_cbor_roundtrip_bundle_signed() {
     let sender = gen_sender_keypair("S1");
     
     let message = b"test message";
-    let wire = encrypt(message, &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(message, &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     // Decode and re-encode
     let bundle: BundleSigned = from_cbor(&wire).unwrap();
@@ -315,8 +318,8 @@ fn test_multiple_senders_same_recipient() {
     let message1 = b"message from S1";
     let message2 = b"message from S2";
     
-    let wire1 = encrypt(message1, &s1, &[pub_a.clone()]).unwrap();
-    let wire2 = encrypt(message2, &s2, &[pub_a.clone()]).unwrap();
+    let wire1 = encrypt(message1, &s1, std::slice::from_ref(&pub_a)).unwrap();
+    let wire2 = encrypt(message2, &s2, std::slice::from_ref(&pub_a)).unwrap();
     
     // A should be able to decrypt both
     let dec1 = decrypt(&wire1, "A", &priv_a.sk_kyber, &allowed).unwrap();
@@ -395,7 +398,7 @@ fn test_binary_data_encryption() {
     
     // Test with binary data (not just text)
     let binary_data = vec![0x00, 0xFF, 0x42, 0x13, 0x37, 0xDE, 0xAD, 0xBE, 0xEF];
-    let wire = encrypt(&binary_data, &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(&binary_data, &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     let decrypted = decrypt(&wire, "A", &priv_a.sk_kyber, &allowed).unwrap();
     assert_eq!(decrypted, binary_data);
@@ -408,7 +411,7 @@ fn test_unicode_message() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
     let message = "Hello 世界 🌍 Привет".as_bytes();
-    let wire = encrypt(message, &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(message, &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     let decrypted = decrypt(&wire, "A", &priv_a.sk_kyber, &allowed).unwrap();
     assert_eq!(decrypted, message);
@@ -425,7 +428,7 @@ fn test_wire_format_structure() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
     let message = b"test";
-    let wire = encrypt(message, &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(message, &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     // Wire should be valid CBOR
     let bundle: BundleSigned = from_cbor(&wire).unwrap();
@@ -490,7 +493,7 @@ fn test_decrypt_malformed_dilithium_pk() {
     let invalid_pk = vec![0u8; 100]; // Too small, should be 1952 bytes
     let allowed = vec![(sender.sid.clone(), invalid_pk)];
     
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     
     let result = decrypt(&wire, "A", &priv_a.sk_kyber, &allowed);
     assert!(matches!(result, Err(TholosError::Malformed("dilithium pk"))));
@@ -502,7 +505,7 @@ fn test_decrypt_malformed_signature() {
     let sender = gen_sender_keypair("S1");
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
     
     // Corrupt the signature bytes (make it wrong size)
@@ -515,10 +518,11 @@ fn test_decrypt_malformed_signature() {
     // Will fail at signature parsing (Malformed) or verification (BadSignature)
     assert!(result.is_err());
     // Check it's either Malformed or BadSignature
-    match result {
-        Err(TholosError::Malformed("signature")) | Err(TholosError::BadSignature) => {},
-        _ => panic!("Expected Malformed or BadSignature error"),
-    }
+    assert!(
+        matches!(result, Err(TholosError::Malformed("signature")) | Err(TholosError::BadSignature)),
+        "Expected Malformed or BadSignature error, got: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -527,7 +531,7 @@ fn test_decrypt_malformed_wrap_nonce_length() {
     let sender = gen_sender_keypair("S1");
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
     
     // Corrupt wrap_nonce to have wrong length
@@ -549,7 +553,7 @@ fn test_decrypt_malformed_kem_ct() {
     let sender = gen_sender_keypair("S1");
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
     
     // Corrupt kem_ct to have wrong size (ML-KEM-1024 encapsulation ciphertext is 1568 bytes, same as public key)
@@ -577,7 +581,7 @@ fn test_decrypt_malformed_cek_length() {
     let sender = gen_sender_keypair("S1");
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
     
     // Corrupt wrapped_cek - this will cause AEAD failure before CEK length check
@@ -602,7 +606,7 @@ fn test_decrypt_malformed_pay_nonce_length() {
     let sender = gen_sender_keypair("S1");
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
     
     // Corrupt pay_nonce to have wrong length
@@ -624,7 +628,7 @@ fn test_decrypt_aead_failure_wrapped_cek() {
     let sender = gen_sender_keypair("S1");
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
     
     // Corrupt wrapped_cek to cause AEAD decryption failure
@@ -650,7 +654,7 @@ fn test_decrypt_aead_failure_payload() {
     let sender = gen_sender_keypair("S1");
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
     
     // Corrupt payload ciphertext to cause AEAD decryption failure
@@ -677,11 +681,11 @@ fn test_decrypt_wrong_kem_ciphertext() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
     
     // Encrypt for A
-    let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
     let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
     
     // Replace A's kem_ct with B's (from a different encryption)
-    let wire_b = encrypt(b"different", &sender, &[pub_b.clone()]).unwrap();
+    let wire_b = encrypt(b"different", &sender, std::slice::from_ref(&pub_b)).unwrap();
     let bundle_b: BundleSigned = from_cbor(&wire_b).unwrap();
     bundle.inner.recipients[0].kem_ct = bundle_b.inner.recipients[0].kem_ct.clone();
     

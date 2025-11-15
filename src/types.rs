@@ -78,7 +78,7 @@ pub fn to_cbor_canonical<T: serde::Serialize>(v: &T) -> Result<Vec<u8>, crate::T
     Ok(buf)
 }
 
-pub fn from_cbor<'a, T: serde::de::DeserializeOwned>(data: &'a [u8]) -> Result<T, crate::TholosError> {
+pub fn from_cbor<T: serde::de::DeserializeOwned>(data: &[u8]) -> Result<T, crate::TholosError> {
     serde_cbor::from_slice::<T>(data).map_err(|e| crate::TholosError::Ser(e.to_string()))
 }
 
