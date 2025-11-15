@@ -330,14 +330,18 @@ fn test_multiple_senders_same_recipient() {
 fn test_encrypt_no_recipients() {
     let sender = gen_sender_keypair("S1");
     
-    // This should probably fail, but let's test the behavior
+    // Test the library's current behavior with empty recipients list for documentation purposes.
+    // The encrypt function currently allows empty recipients and creates a valid bundle,
+    // though such a bundle cannot be decrypted by anyone (no recipient envelopes are created).
     let result = encrypt(b"test", &sender, &[]);
-    // The function might succeed but create an empty recipients list
-    // Let's see what happens - it should work but be useless
     if let Ok(wire) = result {
-        // Should be able to decode but not decrypt
+        // The bundle should be valid CBOR and decode successfully
         let bundle: Result<BundleSigned, _> = from_cbor(&wire);
         assert!(bundle.is_ok());
+        let bundle = bundle.unwrap();
+        // Verify that no recipient envelopes were created
+        assert_eq!(bundle.inner.recipients.len(), 0);
+        assert_eq!(bundle.inner.header.recipients.len(), 0);
     }
 }
 
@@ -548,7 +552,7 @@ fn test_decrypt_malformed_kem_ct() {
     let wire = encrypt(b"test", &sender, &[pub_a.clone()]).unwrap();
     let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
     
-    // Corrupt kem_ct to have wrong size (ML-KEM-1024 ciphertext should be 1568 bytes)
+    // Corrupt kem_ct to have wrong size (ML-KEM-1024 encapsulation ciphertext is 1568 bytes, same as public key)
     bundle.inner.recipients[0].kem_ct = vec![0u8; 100]; // Wrong size
     
     // Re-sign with corrupted data so signature verification passes

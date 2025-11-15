@@ -1,4 +1,4 @@
-[tool.tarpaulin]
+[tarpaulin]
 exclude_files = [
     "src/main.rs",
     "tests/*",
