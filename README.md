@@ -11,7 +11,7 @@ Post-quantum multi-recipient encryption with a versioned CBOR wire format.
 [![Coverage Status](https://coveralls.io/repos/github/thanos/tholos-pq/badge.svg?branch=main)](https://coveralls.io/github/thanos/tholos-pq?branch=main)
 [![crates.io](https://img.shields.io/crates/v/tholos-pq.svg)](https://crates.io/crates/tholos-pq)
 [![docs.rs](https://docs.rs/tholos-pq/badge.svg)](https://docs.rs/tholos-pq)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.85-blue)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/)
 
 ## Features
