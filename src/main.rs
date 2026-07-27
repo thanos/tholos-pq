@@ -44,17 +44,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("C", &priv_c.sk_kyber),
     ] {
         let pt = decrypt(&wire, name, privkey, &allowed)?;
-        println!("Recipient {name} decrypted: {}", String::from_utf8_lossy(&pt));
+        println!(
+            "Recipient {name} decrypted: {}",
+            String::from_utf8_lossy(&pt)
+        );
         assert_eq!(pt, message);
     }
 
     // --- 5️⃣ Try with an invalid sender (signature rejection) ---
     println!("\nTesting invalid sender signature rejection...");
-    let wire_bad = encrypt(b"forbidden", &s1, &[pub_a.clone()])?;
+    let wire_bad = encrypt(b"forbidden", &s1, std::slice::from_ref(&pub_a))?;
     let disallowed = vec![(s2.sid.clone(), sender_pub(&s2).pk_dilithium)];
     let res = decrypt(&wire_bad, "A", &priv_a.sk_kyber, &disallowed);
-    assert!(res.is_err());
-    println!("Invalid sender rejected as expected: {:?}", res.err().unwrap());
+    match res {
+        Err(err) => println!("Invalid sender rejected as expected: {err:?}"),
+        Ok(_) => return Err("expected signature rejection".into()),
+    }
 
     println!("\n✅ All tests passed.");
     Ok(())

@@ -3,12 +3,10 @@
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
-use ml_kem::{MlKem1024, Ciphertext, EncodedSizeUser, KemCore};
 use ml_kem::kem::{Decapsulate, Encapsulate};
+use ml_kem::{Ciphertext, EncodedSizeUser, KemCore, MlKem1024};
 use pqcrypto_dilithium::dilithium3 as dilithium;
-use pqcrypto_traits::sign::{
-    DetachedSignature, PublicKey as SigPublicKey,
-};
+use pqcrypto_traits::sign::{DetachedSignature, PublicKey as SigPublicKey};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::Sha256;
@@ -163,10 +161,7 @@ fn aead_enc(
     let cipher = XChaCha20Poly1305::new(key.into());
     let nonce = XNonce::from(*nonce24);
     cipher
-        .encrypt(
-            &nonce,
-            chacha20poly1305::aead::Payload { msg: pt, aad },
-        )
+        .encrypt(&nonce, chacha20poly1305::aead::Payload { msg: pt, aad })
         .map_err(|_| TholosError::Aead)
 }
 
@@ -179,10 +174,7 @@ fn aead_dec(
     let cipher = XChaCha20Poly1305::new(key.into());
     let nonce = XNonce::from(*nonce24);
     cipher
-        .decrypt(
-            &nonce,
-            chacha20poly1305::aead::Payload { msg: ct, aad },
-        )
+        .decrypt(&nonce, chacha20poly1305::aead::Payload { msg: ct, aad })
         .map_err(|_| TholosError::Aead)
 }
 
@@ -260,8 +252,14 @@ pub fn encrypt(
     let mut envs = Vec::with_capacity(recipients.len());
     for r in recipients {
         let pk_bytes: &[u8] = &r.pk_kyber;
-        let pk = <MlKem1024 as KemCore>::EncapsulationKey::from_bytes(&pk_bytes.try_into().map_err(|_| TholosError::Malformed("ml-kem pk"))?);
-        let (kem_ct, shared) = pk.encapsulate(&mut rng).map_err(|_| TholosError::Malformed("encapsulation"))?;
+        let pk = <MlKem1024 as KemCore>::EncapsulationKey::from_bytes(
+            &pk_bytes
+                .try_into()
+                .map_err(|_| TholosError::Malformed("ml-kem pk"))?,
+        );
+        let (kem_ct, shared) = pk
+            .encapsulate(&mut rng)
+            .map_err(|_| TholosError::Malformed("encapsulation"))?;
 
         let kek = hkdf32(shared.as_slice(), &r.kid, &header_cbor);
 
@@ -383,8 +381,12 @@ pub fn decrypt(
         return Err(TholosError::Malformed("wrap nonce"));
     }
     let kem_ct_bytes: &[u8] = &env.kem_ct;
-    let kem_ct: Ciphertext<MlKem1024> = kem_ct_bytes.try_into().map_err(|_| TholosError::Malformed("kem_ct"))?;
-    let shared = my_sk.decapsulate(&kem_ct).map_err(|_| TholosError::Malformed("decapsulation"))?;
+    let kem_ct: Ciphertext<MlKem1024> = kem_ct_bytes
+        .try_into()
+        .map_err(|_| TholosError::Malformed("kem_ct"))?;
+    let shared = my_sk
+        .decapsulate(&kem_ct)
+        .map_err(|_| TholosError::Malformed("decapsulation"))?;
 
     let header_cbor = crate::types::to_cbor_canonical(&bundle.inner.header)?;
     let kek = hkdf32(shared.as_slice(), my_kid, &header_cbor);

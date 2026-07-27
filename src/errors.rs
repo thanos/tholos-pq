@@ -25,4 +25,3 @@ pub enum TholosError {
     #[error("serialization error: {0}")]
     Ser(String),
 }
-

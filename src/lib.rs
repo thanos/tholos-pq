@@ -59,11 +59,10 @@
 //!
 //! Licensed under the Apache License, Version 2.0.
 
+mod crypto;
 mod errors;
 mod types;
-mod crypto;
 
+pub use crypto::*;
 pub use errors::TholosError;
 pub use types::*;
-pub use crypto::*;
-

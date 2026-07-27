@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used)] // unwrap() is idiomatic in property tests
 
-use tholos_pq::*;
 use pqcrypto_traits::sign::PublicKey;
 use proptest::prelude::*;
+use tholos_pq::*;
 
 // ============================================================================
 // Property: Round-trip encryption/decryption
@@ -18,10 +18,10 @@ proptest! {
         let (pub_key, priv_key) = gen_recipient_keypair(&recipient_id);
         let sender = gen_sender_keypair(&sender_id);
         let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
-        
+
         let wire = encrypt(&message, &sender, std::slice::from_ref(&pub_key))?;
         let decrypted = decrypt(&wire, &recipient_id, &priv_key.sk_kyber, &allowed)?;
-        
+
         prop_assert_eq!(decrypted, message);
     }
 }
@@ -36,10 +36,10 @@ proptest! {
         let (pub_key, priv_key) = gen_recipient_keypair(&recipient_id);
         let sender = gen_sender_keypair(&sender_id);
         let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
-        
+
         let wire = encrypt(message, &sender, std::slice::from_ref(&pub_key))?;
         let decrypted = decrypt(&wire, &recipient_id, &priv_key.sk_kyber, &allowed)?;
-        
+
         prop_assert_eq!(decrypted, message);
     }
 }
@@ -56,7 +56,7 @@ proptest! {
     ) {
         let sender = gen_sender_keypair("SENDER");
         let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
-        
+
         // Generate N recipients
         let mut recipients = Vec::new();
         let mut pub_keys = Vec::new();
@@ -66,10 +66,10 @@ proptest! {
             recipients.push((id, priv_key));
             pub_keys.push(pub_key);
         }
-        
+
         // Encrypt once for all recipients
         let wire = encrypt(&message, &sender, &pub_keys)?;
-        
+
         // All recipients should be able to decrypt
         for (id, priv_key) in &recipients {
             let decrypted = decrypt(&wire, id, &priv_key.sk_kyber, &allowed)?;
@@ -92,15 +92,15 @@ proptest! {
     ) {
         // Ensure different IDs
         prop_assume!(recipient_id != wrong_recipient_id);
-        
+
         let (pub_key, _) = gen_recipient_keypair(&recipient_id);
         let (_, wrong_priv_key) = gen_recipient_keypair(&wrong_recipient_id);
         let sender = gen_sender_keypair(&sender_id);
         let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
-        
+
         // Encrypt for recipient_id
         let wire = encrypt(&message, &sender, std::slice::from_ref(&pub_key))?;
-        
+
         // Wrong recipient should not be able to decrypt
         let result = decrypt(&wire, &recipient_id, &wrong_priv_key.sk_kyber, &allowed);
         prop_assert!(result.is_err());
@@ -121,17 +121,17 @@ proptest! {
     ) {
         // Ensure different sender IDs
         prop_assume!(sender_id != other_sender_id);
-        
+
         let (pub_key, priv_key) = gen_recipient_keypair(&recipient_id);
         let sender = gen_sender_keypair(&sender_id);
         let other_sender = gen_sender_keypair(&other_sender_id);
-        
+
         // Only other_sender is allowed
         let allowed = vec![(other_sender.sid.clone(), sender_pub(&other_sender).pk_dilithium)];
-        
+
         // Encrypt with sender (not allowed)
         let wire = encrypt(&message, &sender, std::slice::from_ref(&pub_key))?;
-        
+
         // Should be rejected
         let result = decrypt(&wire, &recipient_id, &priv_key.sk_kyber, &allowed);
         prop_assert!(result.is_err());
@@ -152,15 +152,15 @@ proptest! {
     ) {
         let (pub_key, _) = gen_recipient_keypair(&recipient_id);
         let sender = gen_sender_keypair(&sender_id);
-        
+
         let wire = encrypt(&message, &sender, std::slice::from_ref(&pub_key))?;
-        
+
         // Should be valid CBOR
         let bundle: Result<BundleSigned, _> = from_cbor(&wire);
         prop_assert!(bundle.is_ok());
-        
+
         let bundle = bundle.unwrap();
-        
+
         // Verify structure
         prop_assert_eq!(bundle.inner.header.v, 1);
         prop_assert_eq!(bundle.inner.header.suite, SUITE_V1);
@@ -187,14 +187,14 @@ proptest! {
     ) {
         let (pub_key, _) = gen_recipient_keypair(&recipient_id);
         let sender = gen_sender_keypair(&sender_id);
-        
+
         // Encrypt same message twice
         let wire1 = encrypt(&message, &sender, std::slice::from_ref(&pub_key))?;
         let wire2 = encrypt(&message, &sender, std::slice::from_ref(&pub_key))?;
-        
+
         // Wire formats should be different due to randomness (nonces, UUIDs, timestamps)
         prop_assert_ne!(&wire1, &wire2);
-        
+
         // But both should decode to valid bundles
         let bundle1: Result<BundleSigned, _> = from_cbor(&wire1);
         let bundle2: Result<BundleSigned, _> = from_cbor(&wire2);
@@ -215,10 +215,10 @@ proptest! {
     ) {
         let (pub1, _) = gen_recipient_keypair(&id1);
         let (pub2, _) = gen_recipient_keypair(&id2);
-        
+
         // Even with same or different IDs, keys should be different (random generation)
         prop_assert_ne!(&pub1.pk_kyber, &pub2.pk_kyber);
-        
+
         // Public keys should have correct size (ML-KEM-1024 = 1568 bytes)
         prop_assert_eq!(pub1.pk_kyber.len(), 1568);
         prop_assert_eq!(pub2.pk_kyber.len(), 1568);
@@ -233,10 +233,10 @@ proptest! {
     ) {
         let s1 = gen_sender_keypair(&id1);
         let s2 = gen_sender_keypair(&id2);
-        
+
         // Keys should be different (random generation)
         prop_assert_ne!(s1.pk_dilithium.as_bytes(), s2.pk_dilithium.as_bytes());
-        
+
         // Public keys should have correct size (Dilithium-3 = 1952 bytes)
         prop_assert_eq!(s1.pk_dilithium.as_bytes().len(), 1952);
         prop_assert_eq!(s2.pk_dilithium.as_bytes().len(), 1952);
@@ -259,18 +259,18 @@ proptest! {
             let (pub_key, _) = gen_recipient_keypair(&format!("R{}", i));
             pub_keys.push(pub_key);
         }
-        
+
         let wire = encrypt(&message, &sender, &pub_keys)?;
-        
+
         // Wire should be larger than message (due to encryption overhead)
         // For empty messages, wire will still have overhead, so use >=
         prop_assert!(wire.len() >= message.len());
-        
+
         // Wire should have reasonable minimum size (header + signature + at least one envelope)
         // Conservative estimate: header ~100 bytes, signature ~3000 bytes, envelope ~1500 bytes per recipient
         let min_size = 100 + 3000 + (num_recipients * 1500);
         prop_assert!(wire.len() >= min_size);
-        
+
         // Wire should decode successfully
         let bundle: Result<BundleSigned, _> = from_cbor(&wire);
         prop_assert!(bundle.is_ok());
@@ -291,20 +291,20 @@ proptest! {
         let (pub_key, priv_key) = gen_recipient_keypair(&recipient_id);
         let s1 = gen_sender_keypair("S1");
         let s2 = gen_sender_keypair("S2");
-        
+
         let allowed = vec![
             (s1.sid.clone(), sender_pub(&s1).pk_dilithium),
             (s2.sid.clone(), sender_pub(&s2).pk_dilithium),
         ];
-        
+
         // Encrypt with both senders
         let wire1 = encrypt(&message1, &s1, std::slice::from_ref(&pub_key))?;
         let wire2 = encrypt(&message2, &s2, std::slice::from_ref(&pub_key))?;
-        
+
         // Recipient should be able to decrypt both
         let dec1 = decrypt(&wire1, &recipient_id, &priv_key.sk_kyber, &allowed)?;
         let dec2 = decrypt(&wire2, &recipient_id, &priv_key.sk_kyber, &allowed)?;
-        
+
         prop_assert_eq!(dec1, message1);
         prop_assert_eq!(dec2, message2);
     }
@@ -325,14 +325,14 @@ proptest! {
         let (pub_key, priv_key) = gen_recipient_keypair(&recipient_id);
         let sender = gen_sender_keypair(&sender_id);
         let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
-        
+
         let wire = encrypt(&message, &sender, std::slice::from_ref(&pub_key))?;
-        
+
         // Corrupt the wire at a random position
         if corruption_pos < wire.len() {
             let mut corrupted = wire.clone();
             corrupted[corruption_pos] ^= 0xFF;
-            
+
             // Should fail to decrypt
             let result = decrypt(&corrupted, &recipient_id, &priv_key.sk_kyber, &allowed);
             prop_assert!(result.is_err());
@@ -362,10 +362,10 @@ proptest! {
             msg_id: msg_id.clone(),
             timestamp_unix: timestamp,
         };
-        
+
         let encoded = to_cbor_canonical(&header)?;
         let decoded: Header = from_cbor(&encoded)?;
-        
+
         prop_assert_eq!(header.v, decoded.v);
         prop_assert_eq!(header.suite, decoded.suite);
         prop_assert_eq!(header.sender, decoded.sender);
@@ -374,4 +374,3 @@ proptest! {
         prop_assert_eq!(header.timestamp_unix, decoded.timestamp_unix);
     }
 }
-
