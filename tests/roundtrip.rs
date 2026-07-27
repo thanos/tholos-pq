@@ -40,5 +40,5 @@ fn signature_rejection() {
 
     let wire = encrypt(b"nope", &s1, std::slice::from_ref(&pub_a)).unwrap();
     let err = decrypt(&wire, "A", &priv_a.sk_kyber, &allowed).unwrap_err();
-    matches!(err, TholosError::BadSignature);
+    assert_eq!(err, TholosError::BadSignature);
 }

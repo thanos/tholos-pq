@@ -1,0 +1,5 @@
+[advisories]
+ignore = [
+    # Transitive via rand/ml-kem; no patched release usable yet.
+    "RUSTSEC-2026-0097",
+]

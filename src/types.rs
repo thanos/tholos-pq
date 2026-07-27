@@ -4,41 +4,51 @@ use serde::{Deserialize, Serialize};
 
 /// Versioned algorithm suite identifier for the current wire format.
 ///
-/// This identifier specifies the cryptographic algorithms used:
-/// - ML-KEM-1024 (Kyber-1024) for key encapsulation
+/// - ML-KEM-1024 for key encapsulation
 /// - XChaCha20-Poly1305 for symmetric encryption
-/// - Dilithium-3 for digital signatures
-pub const SUITE_V1: &str = "Kyber1024+XChaCha20P1305+Dilithium3";
+/// - ML-DSA-65 (Dilithium3) for digital signatures
+pub const SUITE_V1: &str = "Kyber1024+XChaCha20P1305+MlDsa65";
+
+/// ML-DSA-65 / Dilithium3 detached signature length in bytes.
+pub const DILITHIUM3_SIG_LEN: usize = 3309;
+
+/// ML-DSA-65 / Dilithium3 public key length in bytes.
+pub const DILITHIUM3_PK_LEN: usize = 1952;
+
+/// ML-KEM-1024 public key and ciphertext length in bytes.
+pub const MLKEM1024_PK_LEN: usize = 1568;
+
+/// CBOR self-describe tag (RFC 8949 tag 55799): `d9 d9 f7`.
+const CBOR_SELF_DESCRIBE_TAG: [u8; 3] = [0xd9, 0xd9, 0xf7];
 
 /// Sender public key information.
-///
-/// This structure contains the information needed to verify messages from a sender.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct SenderPub {
     /// Sender identifier (e.g., "S1", "alice@example.com").
     pub sid: String,
-    /// Dilithium-3 public key bytes (1952 bytes for Dilithium-3).
+    /// ML-DSA-65 public key bytes (1952 bytes).
     #[serde(with = "serde_bytes")]
     pub pk_dilithium: Vec<u8>,
 }
 
 /// Recipient public key information.
-///
-/// This structure contains the information needed to encrypt messages for a recipient.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RecipientPub {
     /// Recipient identifier (e.g., "A", "bob@example.com").
     pub kid: String,
-    /// ML-KEM-1024 public key bytes (1568 bytes for ML-KEM-1024).
+    /// ML-KEM-1024 public key bytes (1568 bytes).
     #[serde(with = "serde_bytes")]
     pub pk_kyber: Vec<u8>,
 }
 
 /// Message header containing metadata.
 ///
-/// This header is included as additional authenticated data (AAD) in the encryption
-/// operations and is signed as part of the bundle.
+/// The `recipients` list must match the `kid` values in the envelope list exactly
+/// (same order and contents) for a valid bundle.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Header {
     /// Format version number.
     pub v: u32,
@@ -46,7 +56,7 @@ pub struct Header {
     pub suite: String,
     /// Sender identifier.
     pub sender: String,
-    /// List of recipient identifiers.
+    /// List of recipient identifiers; must match envelope `kid` values in order.
     pub recipients: Vec<String>,
     /// Unique message identifier (UUID v4).
     pub msg_id: String,
@@ -55,9 +65,8 @@ pub struct Header {
 }
 
 /// Per-recipient encryption envelope.
-///
-/// Each recipient has their own envelope containing the wrapped content encryption key (CEK).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RecipientEnvelope {
     /// Recipient identifier.
     pub kid: String,
@@ -73,9 +82,8 @@ pub struct RecipientEnvelope {
 }
 
 /// Unsigned bundle containing the encrypted message and recipient envelopes.
-///
-/// This structure is serialized to canonical CBOR and signed to produce the final bundle.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct BundleUnsigned {
     /// Message header.
     pub header: Header,
@@ -91,49 +99,50 @@ pub struct BundleUnsigned {
 
 /// Final signed bundle ready for transmission.
 ///
-/// This is the complete wire format that can be serialized to CBOR and transmitted.
-/// The signature covers the canonical CBOR encoding of `inner`.
+/// The ML-DSA-65 signature covers `inner` verbatim. Only deserialize `inner`
+/// after signature verification succeeds.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct BundleSigned {
-    /// The unsigned bundle containing the encrypted message.
-    pub inner: BundleUnsigned,
-    /// Dilithium-3 detached signature over the canonical CBOR encoding of `inner`.
+    /// CBOR encoding of [`BundleUnsigned`], signed verbatim.
+    #[serde(with = "serde_bytes")]
+    pub inner: Vec<u8>,
+    /// ML-DSA-65 detached signature over `inner`.
     #[serde(with = "serde_bytes")]
     pub sig_dilithium: Vec<u8>,
 }
 
-/// Serialize a value to canonical CBOR format.
+/// Serialize a value to CBOR with a self-describe tag, using `ciborium`.
 ///
-/// The output includes a CBOR self-describe tag and uses deterministic serialization
-/// suitable for cryptographic signatures.
-///
-/// # Arguments
-///
-/// * `v` - The value to serialize
-///
-/// # Returns
-///
-/// The CBOR-encoded bytes, or an error if serialization fails.
-pub fn to_cbor_canonical<T: serde::Serialize>(v: &T) -> Result<Vec<u8>, crate::TholosError> {
-    let mut buf = Vec::new();
-    let mut ser = serde_cbor::ser::Serializer::new(&mut buf);
-    let _ = ser.self_describe(); // attach CBOR self-describe tag for robustness
-                                 // Note: serde_cbor doesn't have a canonical() method, but the default serialization
-                                 // should be deterministic for our use case
-    v.serialize(&mut ser)
-        .map_err(|e| crate::TholosError::Ser(e.to_string()))?;
+/// Output is deterministic for a fixed `ciborium` version but is not full
+/// RFC 8949 canonical CBOR. Signatures cover the encoded `inner` bytes exactly
+/// as produced here.
+pub(crate) fn to_cbor<T: serde::Serialize>(v: &T) -> Result<Vec<u8>, crate::TholosError> {
+    let mut buf = CBOR_SELF_DESCRIBE_TAG.to_vec();
+    ciborium::ser::into_writer(v, &mut buf).map_err(|e| crate::TholosError::Ser(e.to_string()))?;
     Ok(buf)
 }
 
-/// Deserialize a value from CBOR format.
-///
-/// # Arguments
-///
-/// * `data` - The CBOR-encoded bytes
-///
-/// # Returns
-///
-/// The deserialized value, or an error if deserialization fails.
-pub fn from_cbor<T: serde::de::DeserializeOwned>(data: &[u8]) -> Result<T, crate::TholosError> {
-    serde_cbor::from_slice::<T>(data).map_err(|e| crate::TholosError::Ser(e.to_string()))
+/// Deserialize a value from CBOR (optional leading self-describe tag is stripped
+/// only by callers that already validated the outer wire tag).
+pub(crate) fn from_cbor<T: serde::de::DeserializeOwned>(
+    data: &[u8],
+) -> Result<T, crate::TholosError> {
+    let payload = strip_self_describe_prefix(data);
+    ciborium::de::from_reader(payload).map_err(|e| crate::TholosError::Ser(e.to_string()))
+}
+
+pub(crate) fn strip_self_describe_prefix(data: &[u8]) -> &[u8] {
+    if data.len() >= CBOR_SELF_DESCRIBE_TAG.len()
+        && data[..CBOR_SELF_DESCRIBE_TAG.len()] == CBOR_SELF_DESCRIBE_TAG
+    {
+        &data[CBOR_SELF_DESCRIBE_TAG.len()..]
+    } else {
+        data
+    }
+}
+
+pub(crate) fn has_self_describe_tag(data: &[u8]) -> bool {
+    data.len() >= CBOR_SELF_DESCRIBE_TAG.len()
+        && data[..CBOR_SELF_DESCRIBE_TAG.len()] == CBOR_SELF_DESCRIBE_TAG
 }

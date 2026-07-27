@@ -21,52 +21,50 @@ jobs:
   publish:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    # Create a GitHub Environment named "crates-io" and match it in the
-    # crates.io trusted publisher config (optional but recommended).
     environment: crates-io
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
 
       - name: Verify tag matches Cargo.toml version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
+          version="$(cargo metadata --locked --format-version 1 --no-deps | jq -r '.packages[0].version')"
           if [ "$tag" != "$version" ]; then
             echo "::error::Git tag 'v${tag}' does not match Cargo.toml version '${version}'"
             exit 1
           fi
           echo "Publishing tholos-pq ${version}"
 
+      - name: Test
+        if: >-
+          startsWith(github.ref, 'refs/tags/v') ||
+          (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        run: |
+          cargo test --locked --all-targets
+          cargo test --locked --doc
+
       - name: Dry-run publish
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
-        run: cargo publish --dry-run
+        run: cargo publish --locked --dry-run
 
-      # Preferred: trusted publishing via OIDC (no long-lived token).
-      # Fallback: repository secret CARGO_REGISTRY_TOKEN.
-      - name: Authenticate with crates.io (trusted publishing)
+      - name: Authenticate with crates.io
         id: auth
         if: >-
           startsWith(github.ref, 'refs/tags/v') ||
           (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
-        uses: rust-lang/crates-io-auth-action@v1
-        continue-on-error: true
+        uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
 
       - name: Publish
         if: >-
           startsWith(github.ref, 'refs/tags/v') ||
           (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
-        run: |
-          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
-            echo "::error::No crates.io credentials. Configure trusted publishing for this workflow, or set secret CARGO_REGISTRY_TOKEN."
-            exit 1
-          fi
-          cargo publish
+        run: cargo publish --locked
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
