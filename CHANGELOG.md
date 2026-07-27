@@ -32,7 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Zeroization of content encryption keys, derived key material, and ML-DSA secret keys on drop.
 - Checked-in wire-format vectors under `tests/data/v0.2.0/`.
 - Security regression tests (tag stripping, unknown field injection).
-- CI: doctests, `cargo doc`, MSRV job (1.74), dependency audit, `--locked` builds.
+- CI: doctests, `cargo doc`, MSRV job (1.85), dependency audit, `--locked` builds.
+- MSRV raised to 1.85 (`dilithium-rs`, `uuid`, `zeroize`, lockfile v4).
 - Publish workflow runs tests before release.
 - `package.metadata.docs.rs` configuration.
 
