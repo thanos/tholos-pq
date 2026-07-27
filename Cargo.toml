@@ -1,60 +1,53 @@
 [package]
 name = "tholos-pq"
-version = "0.1.1"
+version = "0.3.0"
 edition = "2021"
-description = "Pure post-quantum multi-recipient encryption: Kyber-1024 + Dilithium-3 + XChaCha20-Poly1305 with a stable, versioned wire format"
+rust-version = "1.85"
+description = "Pure-Rust post-quantum multi-recipient encryption: ML-KEM-1024 + ML-DSA-65 + XChaCha20-Poly1305"
 license = "Apache-2.0"
 repository = "https://github.com/thanos/tholos-pq"
 authors = ["Thanos Vassilakis <thanosv@gmail.com>"]
-keywords = ["cryptography", "post-quantum", "encryption", "dilithium", "multi-recipient"]
+keywords = ["cryptography", "post-quantum", "encryption", "ml-dsa", "multi-recipient"]
 categories = ["cryptography", "encoding"]
 readme = "README.md"
 documentation = "https://docs.rs/tholos-pq"
 
-
 [dependencies]
-# Common deps (unchanged)
-rand = "0.8"
+rand = { version = "0.8", features = ["std_rng"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_cbor = "0.11"
+ciborium = "0.2"
 serde_bytes = "0.11"
 uuid = { version = "1.10", features = ["v4"] }
 sha2 = "0.10"
 hkdf = "0.12"
 thiserror = "1.0"
-time = { version = "0.3", features = ["std"] }
 chacha20poly1305 = "0.10.1"
-pqcrypto-traits = "0.3"
-
-# Pure-Rust ML-KEM (Kyber) implementation
-ml-kem = "0.2"     # RustCrypto's post-quantum KEM crate
-pqcrypto-dilithium = { version = "0.5", features = ["neon"], default-features = false }
+zeroize = "1"
+ml-kem = { version = "0.2", features = ["zeroize"] }
+dilithium-rs = "0.3"
 
 [dev-dependencies]
 proptest = "1.5"
+hex = "0.4"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
-# Rust lints
 unsafe_code = "warn"
-# Note: missing_docs can be enabled but may be too strict for development
-# missing_docs = "warn"
 
 [lints.clippy]
-# Clippy configuration
-# Set to "warn" to allow but warn, or "deny" to forbid
 cognitive_complexity = "warn"
 too_many_arguments = "warn"
 too_many_lines = "warn"
 type_complexity = "warn"
-# Security-focused lints (for library code)
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
-# Code quality
 unnecessary_cast = "warn"
 unnecessary_wraps = "warn"
 single_char_pattern = "warn"
-# Allow some common patterns
-many_single_char_names = "allow"  # Common in crypto code (k, r, pk, sk, etc.)
-module_name_repetitions = "allow"  # Common in Rust modules
-cloned_ref_to_slice_refs = "warn"  # Warn about single-element clone() in slices
+many_single_char_names = "allow"
+module_name_repetitions = "allow"
+cloned_ref_to_slice_refs = "warn"

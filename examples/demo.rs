@@ -1,13 +1,9 @@
-//! tholos-pq demo main.rs
-//! Demonstrates multi-recipient encryption using:
-//! - ML-KEM (Kyber) for key encapsulation
-//! - XChaCha20-Poly1305 for payload encryption
-//! - Dilithium-3 for sender signatures
+//! Multi-recipient encryption demo.
 
 use tholos_pq::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // --- 1️⃣ Generate recipient keypairs (A, B, C) ---
+    // 1. Generate recipient keypairs (A, B, C)
     let (pub_a, priv_a) = gen_recipient_keypair("A");
     let (pub_b, priv_b) = gen_recipient_keypair("B");
     let (pub_c, priv_c) = gen_recipient_keypair("C");
@@ -17,27 +13,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  B: {} bytes public key", pub_b.pk_kyber.len());
     println!("  C: {} bytes public key\n", pub_c.pk_kyber.len());
 
-    // --- 2️⃣ Generate sender keypairs (S1, S2) ---
+    // 2. Generate sender keypairs (S1, S2)
     let s1 = gen_sender_keypair("S1");
     let s2 = gen_sender_keypair("S2");
 
     println!("Senders:");
     println!("  S1 + S2 generated (Dilithium-3)\n");
 
-    // Build the allowed sender list: (sid, pk_bytes)
     let allowed = vec![
         (s1.sid.clone(), sender_pub(&s1).pk_dilithium),
         (s2.sid.clone(), sender_pub(&s2).pk_dilithium),
     ];
 
-    // --- 3️⃣ Encrypt a message once for A, B, and C ---
+    // 3. Encrypt a message once for A, B, and C
     let message = b"Hello post-quantum world - one ciphertext, three recipients!";
     let recipients = vec![pub_a.clone(), pub_b.clone(), pub_c.clone()];
 
     let wire = encrypt(message, &s1, &recipients)?;
     println!("Encrypted bundle size: {} bytes", wire.len());
 
-    // --- 4️⃣ Each recipient decrypts using their private key ---
+    // 4. Each recipient decrypts using their private key
     for (name, privkey) in [
         ("A", &priv_a.sk_kyber),
         ("B", &priv_b.sk_kyber),
@@ -48,19 +43,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Recipient {name} decrypted: {}",
             String::from_utf8_lossy(&pt)
         );
-        assert_eq!(pt, message);
+        if pt != message {
+            return Err("decrypted plaintext mismatch".into());
+        }
     }
 
-    // --- 5️⃣ Try with an invalid sender (signature rejection) ---
+    // 5. Invalid sender signature rejection
     println!("\nTesting invalid sender signature rejection...");
     let wire_bad = encrypt(b"forbidden", &s1, std::slice::from_ref(&pub_a))?;
     let disallowed = vec![(s2.sid.clone(), sender_pub(&s2).pk_dilithium)];
-    let res = decrypt(&wire_bad, "A", &priv_a.sk_kyber, &disallowed);
-    match res {
+    match decrypt(&wire_bad, "A", &priv_a.sk_kyber, &disallowed) {
         Err(err) => println!("Invalid sender rejected as expected: {err:?}"),
         Ok(_) => return Err("expected signature rejection".into()),
     }
 
-    println!("\n✅ All tests passed.");
+    println!("\nAll demo checks passed.");
     Ok(())
 }

@@ -1,34 +1,39 @@
 # tholos-pq
 
-A pure Rust implementation of post-quantum multi-recipient encryption with a stable, versioned wire format.
+Post-quantum multi-recipient encryption with a versioned CBOR wire format.
 
 ## Overview
 
-`tholos-pq` provides a complete solution for encrypting messages to multiple recipients using post-quantum cryptographic algorithms. The library uses ML-KEM-1024 (Kyber-1024) for key encapsulation, XChaCha20-Poly1305 for symmetric encryption, and Dilithium-3 for sender authentication.
+`tholos-pq` encrypts messages to multiple recipients using ML-KEM-1024 (Kyber-1024) for key encapsulation, XChaCha20-Poly1305 for symmetric encryption, and Dilithium-3 for sender authentication.
+
+
+[![CI](https://github.com/thanos/tholos-pq/actions/workflows/ci.yml/badge.svg)](https://github.com/thanos/tholos-pq/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/thanos/tholos-pq/badge.svg?branch=main)](https://coveralls.io/github/thanos/tholos-pq?branch=main)
+[![crates.io](https://img.shields.io/crates/v/tholos-pq.svg)](https://crates.io/crates/tholos-pq)
+[![docs.rs](https://docs.rs/tholos-pq/badge.svg)](https://docs.rs/tholos-pq)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85-blue)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/)
 
 ## Features
 
-- **Multi-recipient encryption**: Encrypt once for N recipients efficiently
-- **Post-quantum security**: All cryptographic primitives are quantum-resistant
-- **Sender authentication**: Verify sender identity using Dilithium-3 signatures
-- **Stable wire format**: Versioned CBOR format for interoperability
-- **Pure Rust**: No C dependencies, safe Rust throughout
-- **Comprehensive testing**: Unit tests, integration tests, and property-based tests
+- Multi-recipient encryption: encrypt once for N recipients
+- Post-quantum algorithms: ML-KEM-1024 and Dilithium-3
+- Sender authentication via Dilithium-3 signatures over the signed inner payload
+- Versioned CBOR wire format for interoperability
+- ML-KEM-1024 and ML-DSA-65 via pure-Rust crates (`ml-kem`, `dilithium-rs`); XChaCha20-Poly1305 via `chacha20poly1305`
 
 ## Algorithm Suite
 
 - **Key Encapsulation**: ML-KEM-1024 (Kyber-1024) for per-recipient key wrapping
 - **Symmetric Encryption**: XChaCha20-Poly1305 for payload and CEK encryption
-- **Digital Signatures**: Dilithium-3 for sender authentication
-- **Wire Format**: Canonical CBOR with versioning (`suite = Kyber1024+XChaCha20P1305+Dilithium3`)
+- **Digital Signatures**: ML-DSA-65 (Dilithium3) for sender authentication
+- **Wire Format**: Versioned CBOR (`suite = Kyber1024+XChaCha20P1305+MlDsa65`)
 
 ## Installation
 
-Add this to your `Cargo.toml`:
-
 ```toml
 [dependencies]
-tholos-pq = "0.1.0"
+tholos-pq = "0.3"
 ```
 
 ## Usage
@@ -39,24 +44,16 @@ tholos-pq = "0.1.0"
 use tholos_pq::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Generate recipient keypairs
     let (pub_a, priv_a) = gen_recipient_keypair("alice");
     let (pub_b, priv_b) = gen_recipient_keypair("bob");
-
-    // Generate sender keypair
     let sender = gen_sender_keypair("server1");
-
-    // Build allowed sender list
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
 
-    // Encrypt message for multiple recipients
     let message = b"Hello, post-quantum world!";
     let wire = encrypt(message, &sender, &[pub_a.clone(), pub_b.clone()])?;
 
-    // Each recipient can decrypt
     let decrypted_a = decrypt(&wire, "alice", &priv_a.sk_kyber, &allowed)?;
     let decrypted_b = decrypt(&wire, "bob", &priv_b.sk_kyber, &allowed)?;
-
     assert_eq!(decrypted_a, message);
     assert_eq!(decrypted_b, message);
     Ok(())
@@ -68,24 +65,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```rust
 use tholos_pq::*;
 
-let sender = gen_sender_keypair("server1");
-let (pub_a, priv_a) = gen_recipient_keypair("alice");
-let (pub_b, priv_b) = gen_recipient_keypair("bob");
-let (pub_c, priv_c) = gen_recipient_keypair("charlie");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let sender = gen_sender_keypair("server1");
+    let (pub_a, priv_a) = gen_recipient_keypair("alice");
+    let (pub_b, priv_b) = gen_recipient_keypair("bob");
+    let (pub_c, priv_c) = gen_recipient_keypair("charlie");
+    let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
 
-let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
+    let wire = encrypt(
+        b"Message for A, B, and C",
+        &sender,
+        &[pub_a.clone(), pub_b.clone(), pub_c.clone()],
+    )?;
 
-// Encrypt once for all three recipients
-let wire = encrypt(
-    b"Message for A, B, and C",
-    &sender,
-    &[pub_a.clone(), pub_b.clone(), pub_c.clone()]
-)?;
-
-// Each recipient can decrypt independently
-let pt_a = decrypt(&wire, "alice", &priv_a.sk_kyber, &allowed)?;
-let pt_b = decrypt(&wire, "bob", &priv_b.sk_kyber, &allowed)?;
-let pt_c = decrypt(&wire, "charlie", &priv_c.sk_kyber, &allowed)?;
+    let pt_a = decrypt(&wire, "alice", &priv_a.sk_kyber, &allowed)?;
+    let pt_b = decrypt(&wire, "bob", &priv_b.sk_kyber, &allowed)?;
+    let pt_c = decrypt(&wire, "charlie", &priv_c.sk_kyber, &allowed)?;
+    assert_eq!(pt_a, b"Message for A, B, and C");
+    assert_eq!(pt_b, b"Message for A, B, and C");
+    assert_eq!(pt_c, b"Message for A, B, and C");
+    Ok(())
+}
 ```
 
 ### Sender Authentication
@@ -93,92 +93,118 @@ let pt_c = decrypt(&wire, "charlie", &priv_c.sk_kyber, &allowed)?;
 ```rust
 use tholos_pq::*;
 
-let sender1 = gen_sender_keypair("server1");
-let sender2 = gen_sender_keypair("server2");
-let (pub_key, priv_key) = gen_recipient_keypair("recipient");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let sender1 = gen_sender_keypair("server1");
+    let sender2 = gen_sender_keypair("server2");
+    let (pub_key, priv_key) = gen_recipient_keypair("recipient");
+    let allowed = vec![(sender1.sid.clone(), sender_pub(&sender1).pk_dilithium)];
 
-// Only allow sender1
-let allowed = vec![(sender1.sid.clone(), sender_pub(&sender1).pk_dilithium)];
+    let wire1 = encrypt(b"Hello", &sender1, &[pub_key.clone()])?;
+    let pt1 = decrypt(&wire1, "recipient", &priv_key.sk_kyber, &allowed)?;
+    assert_eq!(pt1, b"Hello");
 
-// Message from sender1 succeeds
-let wire1 = encrypt(b"Hello", &sender1, &[pub_key.clone()])?;
-let pt1 = decrypt(&wire1, "recipient", &priv_key.sk_kyber, &allowed)?;
+    let wire2 = encrypt(b"Hello", &sender2, &[pub_key])?;
+    let result = decrypt(&wire2, "recipient", &priv_key.sk_kyber, &allowed);
+    assert!(matches!(result, Err(TholosError::BadSignature)));
+    Ok(())
+}
+```
 
-// Message from sender2 is rejected
-let wire2 = encrypt(b"Hello", &sender2, &[pub_key.clone()])?;
-let result = decrypt(&wire2, "recipient", &priv_key.sk_kyber, &allowed);
-assert!(matches!(result, Err(TholosError::BadSignature)));
+### Inspecting Headers (Replay Protection)
+
+```rust
+use tholos_pq::*;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (pub_key, priv_key) = gen_recipient_keypair("recipient");
+    let sender = gen_sender_keypair("server1");
+    let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
+
+    let wire = encrypt(b"Hello", &sender, &[pub_key])?;
+    let header = verify_header(&wire, &allowed)?;
+    // Applications can track header.msg_id and header.timestamp_unix for replay protection.
+    let _ = header.msg_id;
+
+    let pt = decrypt(&wire, "recipient", &priv_key.sk_kyber, &allowed)?;
+    assert_eq!(pt, b"Hello");
+    Ok(())
+}
 ```
 
 ## API Reference
 
 ### Key Generation
 
-- `gen_recipient_keypair(kid: &str) -> (RecipientPub, RecipientPriv)`: Generate a new ML-KEM-1024 keypair for a recipient
-- `gen_sender_keypair(sid: &str) -> SenderKeypair`: Generate a new Dilithium-3 keypair for a sender
-- `sender_pub(sender: &SenderKeypair) -> SenderPub`: Extract public key information from a sender keypair
+- `gen_recipient_keypair(kid) -> (RecipientPub, RecipientPriv)`
+- `gen_sender_keypair(sid) -> SenderKeypair`
+- `sender_pub(sender) -> SenderPub`
 
 ### Encryption and Decryption
 
-- `encrypt(plaintext: &[u8], sender: &SenderKeypair, recipients: &[RecipientPub]) -> Result<Vec<u8>, TholosError>`: Encrypt a message for multiple recipients
-- `decrypt(wire_cbor: &[u8], my_kid: &str, my_sk: &<MlKem1024 as KemCore>::DecapsulationKey, allowed_senders: &[(String, Vec<u8>)]) -> Result<Vec<u8>, TholosError>`: Decrypt a message as a recipient
+- `encrypt(plaintext, sender, recipients) -> Result<Vec<u8>, TholosError>`
+- `decrypt(wire, my_kid, my_sk, allowed_senders) -> Result<Vec<u8>, TholosError>`
+- `verify_header(wire, allowed_senders) -> Result<Header, TholosError>`
 
 ### Error Types
 
-The `TholosError` enum includes:
-- `BadSignature`: Signature verification failed or sender not allowed
-- `MissingEnvelope`: No recipient envelope found for the specified recipient ID
-- `Malformed`: A field in the wire format is malformed
-- `Aead`: AEAD encryption or decryption operation failed
-- `Ser`: CBOR serialization or deserialization error
+- `BadSignature`: signature invalid or sender not allowed
+- `MissingEnvelope`: no envelope for the recipient
+- `Malformed`: invalid wire field
+- `Aead`: AEAD failure
+- `Ser`: CBOR serialization/deserialization failure
+- `NoRecipients`: encrypt called with an empty recipient list
+- `UnsupportedSuite`: unsupported version or algorithm suite
+
+## Known Limitations
+
+- No forward secrecy: recipient ML-KEM keys are long-lived; compromise exposes past messages to that recipient
+- No replay protection: `msg_id` and `timestamp_unix` are authenticated but not checked; use `verify_header` and track `msg_id` in your application if needed
+- CBOR encoding uses maintained `ciborium`; signatures cover encoded `inner` bytes verbatim
 
 ## Security Considerations
 
-- All cryptographic operations use secure random number generation via `OsRng`
-- Private keys should be stored securely and never exposed
-- The allowed sender list must be managed carefully to prevent unauthorized access
-- Wire formats should be validated before decryption
-- This library provides cryptographic primitives; key management and distribution are the application's responsibility
+- Cryptographic operations use `OsRng` for randomness
+- Private keys are the caller's responsibility to protect; CEK/KEK material, ML-KEM decapsulation keys, and ML-DSA secret keys are zeroized on drop
+- The allowed sender list must be managed carefully
+- No forward secrecy: recipient ML-KEM keys are long-lived; compromise exposes past messages to that recipient
+- No replay protection: `msg_id` and `timestamp_unix` are authenticated but not checked; use `verify_header` and track `msg_id` in your application if needed
 
 ## Testing
 
-The library includes comprehensive test coverage:
-
-- Unit tests for individual functions
-- Integration tests for round-trip encryption/decryption
-- Property-based tests using `proptest` for correctness validation
-- Error path testing for malformed inputs
-
-Run tests with:
+The crate includes integration tests, property-based tests (`proptest`), security regression tests, and doctests (this README is included in crate documentation).
 
 ```bash
 cargo test
+cargo test --test property
+make check
 ```
 
-Run property tests with:
+Run the demo:
 
 ```bash
-cargo test --test property
+cargo run --example demo
 ```
 
 ## Wire Format
 
-The wire format is a versioned CBOR structure (`BundleSigned`) containing:
+The wire format is a versioned CBOR `BundleSigned` structure:
 
-- **Header**: Version, suite identifier, sender ID, recipient IDs, message ID, timestamp
-- **Payload**: Encrypted plaintext using XChaCha20-Poly1305
-- **Recipient Envelopes**: Per-recipient ML-KEM ciphertexts and wrapped CEKs
-- **Signature**: Dilithium-3 signature over the unsigned bundle
+- **`inner`**: opaque signed CBOR bytes encoding the unsigned bundle
+- **`sig_dilithium`**: ML-DSA-65 signature over `inner` verbatim
 
-The format is designed for interoperability and includes versioning to support future algorithm updates.
+The unsigned bundle contains:
+
+- **Header**: version, suite, sender, recipient IDs, message ID, timestamp
+- **Payload**: XChaCha20-Poly1305 ciphertext
+- **Recipient Envelopes**: per-recipient ML-KEM ciphertexts and wrapped CEKs
 
 ## Dependencies
 
-- `ml-kem`: Pure Rust ML-KEM-1024 implementation
-- `pqcrypto-dilithium`: Dilithium-3 signature implementation
-- `chacha20poly1305`: XChaCha20-Poly1305 AEAD encryption
-- `serde_cbor`: CBOR serialization
-- `hkdf`: Key derivation
+- `ml-kem`: pure-Rust ML-KEM-1024
+- `dilithium-rs`: ML-DSA-65 (Dilithium3)
+- `ciborium`: CBOR serialization
+- `chacha20poly1305`: XChaCha20-Poly1305
+- `hkdf`: key derivation
 
 ## License
 
@@ -186,4 +212,4 @@ Licensed under the Apache License, Version 2.0.
 
 ## Contributing
 
-Contributions are welcome. Please ensure all tests pass and code follows Rust conventions.
+Contributions are welcome. Please run `make check` before submitting a pull request.

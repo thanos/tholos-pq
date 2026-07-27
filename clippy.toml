@@ -1,6 +1,2 @@
-# Clippy configuration file
-# This file provides additional configuration for clippy lints
-
-# Allow single-character variable names in certain contexts (common in crypto code)
+# When false, lints also fire on items that are part of the public API.
 avoid-breaking-exported-api = false
-

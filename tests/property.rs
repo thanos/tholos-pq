@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)] // unwrap() is idiomatic in property tests
 
-use pqcrypto_traits::sign::PublicKey;
 use proptest::prelude::*;
+use tholos_pq::__private::*;
 use tholos_pq::*;
 
 // ============================================================================
@@ -103,7 +103,7 @@ proptest! {
 
         // Wrong recipient should not be able to decrypt
         let result = decrypt(&wire, &recipient_id, &wrong_priv_key.sk_kyber, &allowed);
-        prop_assert!(result.is_err());
+        prop_assert!(matches!(result, Err(TholosError::Aead)));
     }
 }
 
@@ -134,7 +134,6 @@ proptest! {
 
         // Should be rejected
         let result = decrypt(&wire, &recipient_id, &priv_key.sk_kyber, &allowed);
-        prop_assert!(result.is_err());
         prop_assert!(matches!(result, Err(TholosError::BadSignature)));
     }
 }
@@ -156,21 +155,18 @@ proptest! {
         let wire = encrypt(&message, &sender, std::slice::from_ref(&pub_key))?;
 
         // Should be valid CBOR
-        let bundle: Result<BundleSigned, _> = from_cbor(&wire);
-        prop_assert!(bundle.is_ok());
+        let bundle = decode_bundle(&wire)?;
+        let inner = decode_inner(&bundle.inner)?;
 
-        let bundle = bundle.unwrap();
-
-        // Verify structure
-        prop_assert_eq!(bundle.inner.header.v, 1);
-        prop_assert_eq!(bundle.inner.header.suite, SUITE_V1);
-        prop_assert_eq!(bundle.inner.header.sender, sender_id);
-        prop_assert_eq!(bundle.inner.header.recipients.len(), 1);
-        prop_assert_eq!(&bundle.inner.header.recipients[0], &recipient_id);
-        prop_assert_eq!(bundle.inner.recipients.len(), 1);
-        prop_assert_eq!(&bundle.inner.recipients[0].kid, &recipient_id);
-        prop_assert_eq!(bundle.inner.pay_nonce.len(), 24);
-        prop_assert!(!bundle.sig_dilithium.is_empty());
+        prop_assert_eq!(inner.header.v, 1);
+        prop_assert_eq!(inner.header.suite, SUITE_V1);
+        prop_assert_eq!(inner.header.sender, sender_id);
+        prop_assert_eq!(inner.header.recipients.len(), 1);
+        prop_assert_eq!(&inner.header.recipients[0], &recipient_id);
+        prop_assert_eq!(inner.recipients.len(), 1);
+        prop_assert_eq!(&inner.recipients[0].kid, &recipient_id);
+        prop_assert_eq!(inner.pay_nonce.len(), 24);
+        prop_assert_eq!(bundle.sig_dilithium.len(), DILITHIUM3_SIG_LEN);
     }
 }
 
@@ -196,10 +192,9 @@ proptest! {
         prop_assert_ne!(&wire1, &wire2);
 
         // But both should decode to valid bundles
-        let bundle1: Result<BundleSigned, _> = from_cbor(&wire1);
-        let bundle2: Result<BundleSigned, _> = from_cbor(&wire2);
-        prop_assert!(bundle1.is_ok());
-        prop_assert!(bundle2.is_ok());
+        let bundle1 = decode_bundle(&wire1)?;
+        let bundle2 = decode_bundle(&wire2)?;
+        prop_assert_eq!(bundle1.inner.len(), bundle2.inner.len());
     }
 }
 
@@ -235,11 +230,11 @@ proptest! {
         let s2 = gen_sender_keypair(&id2);
 
         // Keys should be different (random generation)
-        prop_assert_ne!(s1.pk_dilithium.as_bytes(), s2.pk_dilithium.as_bytes());
+        prop_assert_ne!(s1.public_key_bytes(), s2.public_key_bytes());
 
         // Public keys should have correct size (Dilithium-3 = 1952 bytes)
-        prop_assert_eq!(s1.pk_dilithium.as_bytes().len(), 1952);
-        prop_assert_eq!(s2.pk_dilithium.as_bytes().len(), 1952);
+        prop_assert_eq!(s1.public_key_bytes().len(), 1952);
+        prop_assert_eq!(s2.public_key_bytes().len(), 1952);
     }
 }
 
@@ -262,18 +257,11 @@ proptest! {
 
         let wire = encrypt(&message, &sender, &pub_keys)?;
 
-        // Wire should be larger than message (due to encryption overhead)
-        // For empty messages, wire will still have overhead, so use >=
-        prop_assert!(wire.len() >= message.len());
-
-        // Wire should have reasonable minimum size (header + signature + at least one envelope)
-        // Conservative estimate: header ~100 bytes, signature ~3000 bytes, envelope ~1500 bytes per recipient
-        let min_size = 100 + 3000 + (num_recipients * 1500);
-        prop_assert!(wire.len() >= min_size);
-
-        // Wire should decode successfully
-        let bundle: Result<BundleSigned, _> = from_cbor(&wire);
-        prop_assert!(bundle.is_ok());
+        let bundle = decode_bundle(&wire)?;
+        let inner = decode_inner(&bundle.inner)?;
+        prop_assert_eq!(bundle.sig_dilithium.len(), DILITHIUM3_SIG_LEN);
+        prop_assert!(!inner.ciphertext.is_empty() || message.is_empty());
+        prop_assert_eq!(inner.recipients.len(), num_recipients);
     }
 }
 
@@ -320,7 +308,7 @@ proptest! {
         message in prop::collection::vec(any::<u8>(), 1..1000),
         recipient_id in "[A-Za-z0-9_]{1,20}",
         sender_id in "[A-Za-z0-9_]{1,20}",
-        corruption_pos in 0usize..10000,
+        corruption_idx in any::<prop::sample::Index>(),
     ) {
         let (pub_key, priv_key) = gen_recipient_keypair(&recipient_id);
         let sender = gen_sender_keypair(&sender_id);
@@ -328,15 +316,19 @@ proptest! {
 
         let wire = encrypt(&message, &sender, std::slice::from_ref(&pub_key))?;
 
-        // Corrupt the wire at a random position
-        if corruption_pos < wire.len() {
-            let mut corrupted = wire.clone();
-            corrupted[corruption_pos] ^= 0xFF;
+        let mut corrupted = wire.clone();
+        let pos = corruption_idx.index(wire.len());
+        corrupted[pos] ^= 0xFF;
 
-            // Should fail to decrypt
-            let result = decrypt(&corrupted, &recipient_id, &priv_key.sk_kyber, &allowed);
-            prop_assert!(result.is_err());
-        }
+        let result = decrypt(&corrupted, &recipient_id, &priv_key.sk_kyber, &allowed);
+        assert!(matches!(
+            result,
+            Err(TholosError::BadSignature)
+                | Err(TholosError::Aead)
+                | Err(TholosError::Malformed(_))
+                | Err(TholosError::Ser(_))
+                | Err(TholosError::UnsupportedSuite { .. })
+        ));
     }
 }
 
@@ -363,8 +355,8 @@ proptest! {
             timestamp_unix: timestamp,
         };
 
-        let encoded = to_cbor_canonical(&header)?;
-        let decoded: Header = from_cbor(&encoded)?;
+        let encoded = encode_cbor(&header)?;
+        let decoded: Header = decode_cbor(&encoded)?;
 
         prop_assert_eq!(header.v, decoded.v);
         prop_assert_eq!(header.suite, decoded.suite);

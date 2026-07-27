@@ -1,9 +1,17 @@
 #![allow(clippy::unwrap_used)] // unwrap() is idiomatic in tests
 #![allow(clippy::panic)] // panic!() is acceptable in tests for assertions
 
-use pqcrypto_dilithium::dilithium3 as dilithium;
-use pqcrypto_traits::sign::{DetachedSignature, PublicKey};
+use tholos_pq::__private::*;
 use tholos_pq::*;
+
+fn decode_inner_from_wire(wire: &[u8]) -> BundleUnsigned {
+    let bundle = decode_bundle(wire).unwrap();
+    decode_inner(&bundle.inner).unwrap()
+}
+
+fn wire_from_inner(inner: &BundleUnsigned, sender: &SenderKeypair) -> Vec<u8> {
+    encode_bundle(&resign_bundle(inner, sender).unwrap()).unwrap()
+}
 
 // ============================================================================
 // Key Generation Tests
@@ -35,7 +43,7 @@ fn test_gen_sender_keypair() {
 
     assert_eq!(sender.sid, "test_sender");
     // Dilithium-3 public key is 1952 bytes
-    assert_eq!(sender.pk_dilithium.as_bytes().len(), 1952);
+    assert_eq!(sender.public_key_bytes().len(), 1952);
 }
 
 #[test]
@@ -44,7 +52,7 @@ fn test_gen_sender_keypair_unique() {
     let s2 = gen_sender_keypair("S2");
 
     // Different senders should have different keys
-    assert_ne!(s1.pk_dilithium.as_bytes(), s2.pk_dilithium.as_bytes());
+    assert_ne!(s1.public_key_bytes(), s2.public_key_bytes());
 }
 
 #[test]
@@ -54,7 +62,7 @@ fn test_sender_pub() {
 
     assert_eq!(pub_key.sid, "test_sender");
     assert_eq!(pub_key.pk_dilithium.len(), 1952);
-    assert_eq!(pub_key.pk_dilithium, sender.pk_dilithium.as_bytes());
+    assert_eq!(pub_key.pk_dilithium, sender.public_key_bytes());
 }
 
 // ============================================================================
@@ -125,7 +133,7 @@ fn test_encrypt_decrypt_many_recipients() {
 }
 
 #[test]
-fn test_encrypt_deterministic_header() {
+fn test_encrypt_output_is_randomized() {
     let (pub_a, _) = gen_recipient_keypair("A");
     let sender = gen_sender_keypair("S1");
 
@@ -155,7 +163,7 @@ fn test_decrypt_wrong_recipient_key() {
 
     // B tries to decrypt message intended for A - should fail
     let result = decrypt(&wire, "A", &priv_b.sk_kyber, &allowed);
-    assert!(result.is_err());
+    assert!(matches!(result, Err(TholosError::Aead)));
 }
 
 #[test]
@@ -205,7 +213,13 @@ fn test_decrypt_corrupted_signature() {
     }
 
     let result = decrypt(&corrupted, "A", &priv_a.sk_kyber, &allowed);
-    assert!(result.is_err());
+    assert!(matches!(
+        result,
+        Err(TholosError::BadSignature)
+            | Err(TholosError::Aead)
+            | Err(TholosError::Malformed(_))
+            | Err(TholosError::Ser(_))
+    ));
 }
 
 #[test]
@@ -223,8 +237,13 @@ fn test_decrypt_corrupted_ciphertext() {
     corrupted[corrupt_pos] ^= 0xFF;
 
     let result = decrypt(&corrupted, "A", &priv_a.sk_kyber, &allowed);
-    // Should fail during decryption or signature verification
-    assert!(result.is_err());
+    assert!(matches!(
+        result,
+        Err(TholosError::BadSignature)
+            | Err(TholosError::Aead)
+            | Err(TholosError::Malformed(_))
+            | Err(TholosError::Ser(_))
+    ));
 }
 
 #[test]
@@ -237,7 +256,10 @@ fn test_decrypt_invalid_cbor() {
     let invalid_cbor = b"not valid cbor data";
 
     let result = decrypt(invalid_cbor, "A", &priv_a.sk_kyber, &allowed);
-    assert!(matches!(result, Err(TholosError::Ser(_))));
+    assert!(matches!(
+        result,
+        Err(TholosError::Ser(_)) | Err(TholosError::Malformed("wire self-describe tag"))
+    ));
 }
 
 #[test]
@@ -267,8 +289,8 @@ fn test_cbor_roundtrip_header() {
         timestamp_unix: 1234567890,
     };
 
-    let encoded = to_cbor_canonical(&header).unwrap();
-    let decoded: Header = from_cbor(&encoded).unwrap();
+    let encoded = encode_cbor(&header).unwrap();
+    let decoded: Header = decode_cbor(&encoded).unwrap();
 
     assert_eq!(header.v, decoded.v);
     assert_eq!(header.suite, decoded.suite);
@@ -287,8 +309,8 @@ fn test_cbor_roundtrip_bundle_signed() {
     let wire = encrypt(message, &sender, std::slice::from_ref(&pub_a)).unwrap();
 
     // Decode and re-encode
-    let bundle: BundleSigned = from_cbor(&wire).unwrap();
-    let re_encoded = to_cbor_canonical(&bundle).unwrap();
+    let bundle: BundleSigned = decode_bundle(&wire).unwrap();
+    let re_encoded = encode_bundle(&bundle).unwrap();
 
     // Should be able to decrypt the re-encoded version
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
@@ -299,8 +321,8 @@ fn test_cbor_roundtrip_bundle_signed() {
 #[test]
 fn test_cbor_invalid_data() {
     let invalid_data = b"not cbor";
-    let result: Result<Header, _> = from_cbor(invalid_data);
-    assert!(result.is_err());
+    let result: Result<Header, _> = decode_cbor(invalid_data);
+    assert!(matches!(result, Err(TholosError::Ser(_))));
 }
 
 // ============================================================================
@@ -335,24 +357,12 @@ fn test_multiple_senders_same_recipient() {
 #[test]
 fn test_encrypt_no_recipients() {
     let sender = gen_sender_keypair("S1");
-
-    // Test the library's current behavior with empty recipients list for documentation purposes.
-    // The encrypt function currently allows empty recipients and creates a valid bundle,
-    // though such a bundle cannot be decrypted by anyone (no recipient envelopes are created).
     let result = encrypt(b"test", &sender, &[]);
-    if let Ok(wire) = result {
-        // The bundle should be valid CBOR and decode successfully
-        let bundle: Result<BundleSigned, _> = from_cbor(&wire);
-        assert!(bundle.is_ok());
-        let bundle = bundle.unwrap();
-        // Verify that no recipient envelopes were created
-        assert_eq!(bundle.inner.recipients.len(), 0);
-        assert_eq!(bundle.inner.header.recipients.len(), 0);
-    }
+    assert!(matches!(result, Err(TholosError::NoRecipients)));
 }
 
 #[test]
-fn test_recipient_keypair_idempotency() {
+fn test_recipient_keypair_is_randomized() {
     // Generating the same keypair twice should produce different keys
     let (pub1, _priv1) = gen_recipient_keypair("same_id");
     let (pub2, _priv2) = gen_recipient_keypair("same_id");
@@ -362,13 +372,13 @@ fn test_recipient_keypair_idempotency() {
 }
 
 #[test]
-fn test_sender_keypair_idempotency() {
+fn test_sender_keypair_is_randomized() {
     // Generating the same sender keypair twice should produce different keys
     let s1 = gen_sender_keypair("same_id");
     let s2 = gen_sender_keypair("same_id");
 
     // Even with same ID, keys should be different (random generation)
-    assert_ne!(s1.pk_dilithium.as_bytes(), s2.pk_dilithium.as_bytes());
+    assert_ne!(s1.public_key_bytes(), s2.public_key_bytes());
 }
 
 #[test]
@@ -437,17 +447,17 @@ fn test_wire_format_structure() {
     let wire = encrypt(message, &sender, std::slice::from_ref(&pub_a)).unwrap();
 
     // Wire should be valid CBOR
-    let bundle: BundleSigned = from_cbor(&wire).unwrap();
+    let bundle: BundleSigned = decode_bundle(&wire).unwrap();
+    let inner = decode_inner(&bundle.inner).unwrap();
 
-    // Verify structure
-    assert_eq!(bundle.inner.header.v, 1);
-    assert_eq!(bundle.inner.header.suite, SUITE_V1);
-    assert_eq!(bundle.inner.header.sender, sender.sid);
-    assert_eq!(bundle.inner.header.recipients.len(), 1);
-    assert_eq!(bundle.inner.header.recipients[0], "A");
-    assert_eq!(bundle.inner.recipients.len(), 1);
-    assert_eq!(bundle.inner.recipients[0].kid, "A");
-    assert_eq!(bundle.inner.pay_nonce.len(), 24);
+    assert_eq!(inner.header.v, 1);
+    assert_eq!(inner.header.suite, SUITE_V1);
+    assert_eq!(inner.header.sender, sender.sid);
+    assert_eq!(inner.header.recipients.len(), 1);
+    assert_eq!(inner.header.recipients[0], "A");
+    assert_eq!(inner.recipients.len(), 1);
+    assert_eq!(inner.recipients[0].kid, "A");
+    assert_eq!(inner.pay_nonce.len(), 24);
     assert!(!bundle.sig_dilithium.is_empty());
 
     // Should still decrypt correctly
@@ -462,14 +472,15 @@ fn test_header_contains_correct_info() {
     let sender = gen_sender_keypair("SENDER1");
 
     let wire = encrypt(b"test", &sender, &[pub_a.clone(), pub_b.clone()]).unwrap();
-    let bundle: BundleSigned = from_cbor(&wire).unwrap();
+    let bundle: BundleSigned = decode_bundle(&wire).unwrap();
+    let inner = decode_inner(&bundle.inner).unwrap();
 
-    assert_eq!(bundle.inner.header.sender, "SENDER1");
-    assert_eq!(bundle.inner.header.recipients.len(), 2);
-    assert!(bundle.inner.header.recipients.contains(&"A".to_string()));
-    assert!(bundle.inner.header.recipients.contains(&"B".to_string()));
-    assert!(!bundle.inner.header.msg_id.is_empty());
-    assert!(bundle.inner.header.timestamp_unix > 0);
+    assert_eq!(inner.header.sender, "SENDER1");
+    assert_eq!(inner.header.recipients.len(), 2);
+    assert!(inner.header.recipients.contains(&"A".to_string()));
+    assert!(inner.header.recipients.contains(&"B".to_string()));
+    assert!(!inner.header.msg_id.is_empty());
+    assert!(inner.header.timestamp_unix > 0);
 }
 
 // ============================================================================
@@ -515,18 +526,15 @@ fn test_decrypt_malformed_signature() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
 
     let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
-    let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
+    let mut bundle: BundleSigned = decode_bundle(&wire).unwrap();
 
     // Corrupt the signature bytes (make it wrong size)
     // But keep it valid size for parsing, then it will fail at verification
     // Actually, let's make it invalid size so it fails at parsing
     bundle.sig_dilithium = vec![0u8; 100]; // Invalid size for Dilithium-3 signature
 
-    let corrupted_wire = to_cbor_canonical(&bundle).unwrap();
+    let corrupted_wire = encode_bundle(&bundle).unwrap();
     let result = decrypt(&corrupted_wire, "A", &priv_a.sk_kyber, &allowed);
-    // Will fail at signature parsing (Malformed) or verification (BadSignature)
-    assert!(result.is_err());
-    // Check it's either Malformed or BadSignature
     assert!(
         matches!(
             result,
@@ -544,17 +552,10 @@ fn test_decrypt_malformed_wrap_nonce_length() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
 
     let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
-    let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
+    let mut inner = decode_inner_from_wire(&wire);
+    inner.recipients[0].wrap_nonce = vec![0u8; 23];
 
-    // Corrupt wrap_nonce to have wrong length
-    bundle.inner.recipients[0].wrap_nonce = vec![0u8; 23]; // Should be 24
-
-    // Re-sign with corrupted data so signature verification passes
-    let inner_cbor = to_cbor_canonical(&bundle.inner).unwrap();
-    let sig = dilithium::detached_sign(&inner_cbor, &sender.sk_dilithium);
-    bundle.sig_dilithium = sig.as_bytes().to_vec();
-
-    let corrupted_wire = to_cbor_canonical(&bundle).unwrap();
+    let corrupted_wire = wire_from_inner(&inner, &sender);
     let result = decrypt(&corrupted_wire, "A", &priv_a.sk_kyber, &allowed);
     assert!(matches!(result, Err(TholosError::Malformed("wrap nonce"))));
 }
@@ -566,50 +567,12 @@ fn test_decrypt_malformed_kem_ct() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
 
     let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
-    let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
+    let mut inner = decode_inner_from_wire(&wire);
+    inner.recipients[0].kem_ct = vec![0u8; 100];
 
-    // Corrupt kem_ct to have wrong size (ML-KEM-1024 encapsulation ciphertext is 1568 bytes, same as public key)
-    bundle.inner.recipients[0].kem_ct = vec![0u8; 100]; // Wrong size
-
-    // Re-sign with corrupted data so signature verification passes
-    let inner_cbor = to_cbor_canonical(&bundle.inner).unwrap();
-    let sig = dilithium::detached_sign(&inner_cbor, &sender.sk_dilithium);
-    bundle.sig_dilithium = sig.as_bytes().to_vec();
-
-    let corrupted_wire = to_cbor_canonical(&bundle).unwrap();
+    let corrupted_wire = wire_from_inner(&inner, &sender);
     let result = decrypt(&corrupted_wire, "A", &priv_a.sk_kyber, &allowed);
     assert!(matches!(result, Err(TholosError::Malformed("kem_ct"))));
-}
-
-#[test]
-fn test_decrypt_malformed_cek_length() {
-    // This is difficult to test directly because we'd need to make wrapped_cek
-    // decrypt to a non-32-byte value, which is cryptographically hard.
-    // The check at line 225-226 is a safety check that should never trigger
-    // in normal operation. We can verify the code path exists by checking
-    // that the function properly handles AEAD failures which would occur first.
-
-    let (pub_a, priv_a) = gen_recipient_keypair("A");
-    let sender = gen_sender_keypair("S1");
-    let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
-
-    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
-    let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
-
-    // Corrupt wrapped_cek - this will cause AEAD failure before CEK length check
-    // The CEK length check is a defensive measure that's hard to trigger
-    // without breaking AEAD, which fails first
-    bundle.inner.recipients[0].wrapped_cek = vec![0u8; 50]; // Wrong size, will fail decryption
-
-    // Re-sign with corrupted data
-    let inner_cbor = to_cbor_canonical(&bundle.inner).unwrap();
-    let sig = dilithium::detached_sign(&inner_cbor, &sender.sk_dilithium);
-    bundle.sig_dilithium = sig.as_bytes().to_vec();
-
-    let corrupted_wire = to_cbor_canonical(&bundle).unwrap();
-    let result = decrypt(&corrupted_wire, "A", &priv_a.sk_kyber, &allowed);
-    // This will fail at AEAD decryption before reaching CEK length check
-    assert!(matches!(result, Err(TholosError::Aead)));
 }
 
 #[test]
@@ -619,17 +582,10 @@ fn test_decrypt_malformed_pay_nonce_length() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
 
     let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
-    let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
+    let mut inner = decode_inner_from_wire(&wire);
+    inner.pay_nonce = vec![0u8; 23];
 
-    // Corrupt pay_nonce to have wrong length
-    bundle.inner.pay_nonce = vec![0u8; 23]; // Should be 24
-
-    // Re-sign with corrupted data so signature verification passes
-    let inner_cbor = to_cbor_canonical(&bundle.inner).unwrap();
-    let sig = dilithium::detached_sign(&inner_cbor, &sender.sk_dilithium);
-    bundle.sig_dilithium = sig.as_bytes().to_vec();
-
-    let corrupted_wire = to_cbor_canonical(&bundle).unwrap();
+    let corrupted_wire = wire_from_inner(&inner, &sender);
     let result = decrypt(&corrupted_wire, "A", &priv_a.sk_kyber, &allowed);
     assert!(matches!(result, Err(TholosError::Malformed("pay nonce"))));
 }
@@ -641,21 +597,13 @@ fn test_decrypt_aead_failure_wrapped_cek() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
 
     let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
-    let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
-
-    // Corrupt wrapped_cek to cause AEAD decryption failure
-    // Flip some bits in the ciphertext
-    if !bundle.inner.recipients[0].wrapped_cek.is_empty() {
-        let len = bundle.inner.recipients[0].wrapped_cek.len();
-        bundle.inner.recipients[0].wrapped_cek[len - 1] ^= 0xFF;
+    let mut inner = decode_inner_from_wire(&wire);
+    if !inner.recipients[0].wrapped_cek.is_empty() {
+        let len = inner.recipients[0].wrapped_cek.len();
+        inner.recipients[0].wrapped_cek[len - 1] ^= 0xFF;
     }
 
-    // Re-sign with corrupted data so signature verification passes
-    let inner_cbor = to_cbor_canonical(&bundle.inner).unwrap();
-    let sig = dilithium::detached_sign(&inner_cbor, &sender.sk_dilithium);
-    bundle.sig_dilithium = sig.as_bytes().to_vec();
-
-    let corrupted_wire = to_cbor_canonical(&bundle).unwrap();
+    let corrupted_wire = wire_from_inner(&inner, &sender);
     let result = decrypt(&corrupted_wire, "A", &priv_a.sk_kyber, &allowed);
     assert!(matches!(result, Err(TholosError::Aead)));
 }
@@ -667,20 +615,13 @@ fn test_decrypt_aead_failure_payload() {
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
 
     let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
-    let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
-
-    // Corrupt payload ciphertext to cause AEAD decryption failure
-    if !bundle.inner.ciphertext.is_empty() {
-        let len = bundle.inner.ciphertext.len();
-        bundle.inner.ciphertext[len - 1] ^= 0xFF;
+    let mut inner = decode_inner_from_wire(&wire);
+    if !inner.ciphertext.is_empty() {
+        let len = inner.ciphertext.len();
+        inner.ciphertext[len - 1] ^= 0xFF;
     }
 
-    // Re-sign with corrupted data so signature verification passes
-    let inner_cbor = to_cbor_canonical(&bundle.inner).unwrap();
-    let sig = dilithium::detached_sign(&inner_cbor, &sender.sk_dilithium);
-    bundle.sig_dilithium = sig.as_bytes().to_vec();
-
-    let corrupted_wire = to_cbor_canonical(&bundle).unwrap();
+    let corrupted_wire = wire_from_inner(&inner, &sender);
     let result = decrypt(&corrupted_wire, "A", &priv_a.sk_kyber, &allowed);
     assert!(matches!(result, Err(TholosError::Aead)));
 }
@@ -692,55 +633,45 @@ fn test_decrypt_wrong_kem_ciphertext() {
     let sender = gen_sender_keypair("S1");
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
 
-    // Encrypt for A
     let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
-    let mut bundle: BundleSigned = from_cbor(&wire).unwrap();
-
-    // Replace A's kem_ct with B's (from a different encryption)
     let wire_b = encrypt(b"different", &sender, std::slice::from_ref(&pub_b)).unwrap();
-    let bundle_b: BundleSigned = from_cbor(&wire_b).unwrap();
-    bundle.inner.recipients[0].kem_ct = bundle_b.inner.recipients[0].kem_ct.clone();
 
-    // Re-sign with corrupted data
-    let inner_cbor = to_cbor_canonical(&bundle.inner).unwrap();
-    let sig = dilithium::detached_sign(&inner_cbor, &sender.sk_dilithium);
-    bundle.sig_dilithium = sig.as_bytes().to_vec();
+    let mut inner = decode_inner_from_wire(&wire);
+    let inner_b = decode_inner_from_wire(&wire_b);
+    inner.recipients[0].kem_ct = inner_b.recipients[0].kem_ct.clone();
 
-    let corrupted_wire = to_cbor_canonical(&bundle).unwrap();
-    // This should fail at decapsulation or produce wrong shared secret
+    let corrupted_wire = wire_from_inner(&inner, &sender);
     let result = decrypt(&corrupted_wire, "A", &priv_a.sk_kyber, &allowed);
-    // Will fail at AEAD decryption because KEK will be wrong
-    assert!(result.is_err());
+    assert!(matches!(result, Err(TholosError::Aead)));
 }
 
 #[test]
-fn test_encrypt_serialization_error() {
-    // This is hard to trigger directly, but we can test that serialization errors
-    // are properly propagated. The to_cbor_canonical function should handle
-    // serialization errors correctly.
-    // Most serialization errors would be caught at compile time or be very rare.
-    // We'll test that the error type is correct by checking error propagation.
-
-    let sender = gen_sender_keypair("S1");
-    let (pub_a, _) = gen_recipient_keypair("A");
-
-    // Normal encryption should work
-    let result = encrypt(b"test", &sender, &[pub_a]);
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_decrypt_serialization_error_inner_cbor() {
-    // Test that serialization errors in inner_cbor generation are handled
-    // This is difficult to trigger directly, but we can verify the error path exists
-    // by checking that malformed data causes proper errors
-
-    let (_pub_a, priv_a) = gen_recipient_keypair("A");
+fn test_decrypt_unsupported_suite() {
+    let (pub_a, priv_a) = gen_recipient_keypair("A");
     let sender = gen_sender_keypair("S1");
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
 
-    // Use completely invalid CBOR
-    let invalid_cbor = b"not cbor at all";
-    let result = decrypt(invalid_cbor, "A", &priv_a.sk_kyber, &allowed);
-    assert!(matches!(result, Err(TholosError::Ser(_))));
+    let wire = encrypt(b"test", &sender, std::slice::from_ref(&pub_a)).unwrap();
+    let mut inner = decode_inner_from_wire(&wire);
+    inner.header.v = 2;
+    inner.header.suite = "FutureSuite".to_string();
+
+    let corrupted_wire = wire_from_inner(&inner, &sender);
+    let result = decrypt(&corrupted_wire, "A", &priv_a.sk_kyber, &allowed);
+    assert!(matches!(
+        result,
+        Err(TholosError::UnsupportedSuite { v: 2, .. })
+    ));
+}
+
+#[test]
+fn test_verify_header_returns_authenticated_header() {
+    let (pub_a, _) = gen_recipient_keypair("A");
+    let sender = gen_sender_keypair("S1");
+    let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
+
+    let wire = encrypt(b"hello", &sender, std::slice::from_ref(&pub_a)).unwrap();
+    let header = verify_header(&wire, &allowed).unwrap();
+    assert_eq!(header.sender, sender.sid);
+    assert!(!header.msg_id.is_empty());
 }
