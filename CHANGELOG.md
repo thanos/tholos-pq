@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-07-27
+## [0.3.0] - 2026-07-27
 
 ### Changed
 
@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `NoRecipients` and `UnsupportedSuite` error variants.
 - Recipient list consistency validation (header vs envelopes, no duplicate `kid`s).
 - Zeroization of content encryption keys, derived key material, and ML-DSA secret keys on drop.
-- Checked-in wire-format vectors under `tests/data/v0.2.0/`.
+- Checked-in wire-format vectors under `tests/data/v0.3.0/`.
 - Security regression tests (tag stripping, unknown field injection).
 - CI: doctests, `cargo doc`, MSRV job (1.85), dependency audit, `--locked` builds.
 - MSRV raised to 1.85 (`dilithium-rs`, `uuid`, `zeroize`, lockfile v4).

@@ -33,7 +33,7 @@ Post-quantum multi-recipient encryption with a versioned CBOR wire format.
 
 ```toml
 [dependencies]
-tholos-pq = "0.2"
+tholos-pq = "0.3"
 ```
 
 ## Usage

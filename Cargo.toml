@@ -1,6 +1,6 @@
 [package]
 name = "tholos-pq"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Pure-Rust post-quantum multi-recipient encryption: ML-KEM-1024 + ML-DSA-65 + XChaCha20-Poly1305"

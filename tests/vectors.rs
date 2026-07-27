@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-//! Checked-in wire-format vectors for v0.2.0 (ciborium + ML-DSA-65).
+//! Checked-in wire-format vectors for v0.3.0 (ciborium + ML-DSA-65).
 //!
 //! Parameters:
 //! - recipient ML-KEM key from `StdRng::seed_from_u64(0x7A01_0005)`
@@ -14,7 +14,7 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use tholos_pq::*;
 
-const PLAINTEXT: &[u8] = b"tholos-pq wire format vector v0.2.0";
+const PLAINTEXT: &[u8] = b"tholos-pq wire format vector v0.3.0";
 const MSG_ID: &str = "00000000-0000-4000-8000-000000000001";
 const TIMESTAMP: u64 = 1_700_000_000;
 const KEY_SEED: u64 = 0x7A01_0005;
@@ -56,7 +56,7 @@ fn decrypt_stored_wire_vector() {
     assert_eq!(pub_r.pk_kyber.len(), MLKEM1024_PK_LEN);
     assert_eq!(sender.public_key_bytes().len(), DILITHIUM3_PK_LEN);
 
-    let wire = load_hex(include_str!("data/v0.2.0/wire.hex"));
+    let wire = load_hex(include_str!("data/v0.3.0/wire.hex"));
     let allowed = vec![(sender.sid.clone(), sender_pub(&sender).pk_dilithium)];
 
     let header = verify_header(&wire, &allowed).unwrap();
@@ -72,15 +72,15 @@ fn decrypt_stored_wire_vector() {
 #[test]
 fn encrypt_with_seed_matches_stored_wire() {
     let (pub_r, _, sender) = vector_keys();
-    let expected = load_hex(include_str!("data/v0.2.0/wire.hex"));
+    let expected = load_hex(include_str!("data/v0.3.0/wire.hex"));
     let wire = make_wire(&pub_r, &sender);
     assert_eq!(
         wire, expected,
-        "encoder drift: regenerating with the same seeds must match tests/data/v0.2.0/wire.hex"
+        "encoder drift: regenerating with the same seeds must match tests/data/v0.3.0/wire.hex"
     );
 }
 
-/// Regenerates `tests/data/v0.2.0/*.hex` when run with `--ignored --nocapture`.
+/// Regenerates `tests/data/v0.3.0/*.hex` when run with `--ignored --nocapture`.
 #[test]
 #[ignore]
 fn regenerate_vector_files() {
@@ -89,7 +89,7 @@ fn regenerate_vector_files() {
 
     let (pub_r, _, sender) = vector_keys();
     let wire = make_wire(&pub_r, &sender);
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/v0.2.0");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/v0.3.0");
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("sender_pk.hex"),
