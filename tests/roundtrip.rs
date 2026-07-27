@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)] // unwrap() is idiomatic in tests
+
 use tholos_pq::*;
 
 #[test]
@@ -17,7 +19,11 @@ fn three_recipients_roundtrip() {
     let wire = encrypt(msg, &s1, &[pub_a.clone(), pub_b.clone(), pub_c.clone()]).unwrap();
 
     // A, B, C can all decrypt
-    for (kid, sk) in [("A", &priv_a.sk_kyber), ("B", &priv_b.sk_kyber), ("C", &priv_c.sk_kyber)] {
+    for (kid, sk) in [
+        ("A", &priv_a.sk_kyber),
+        ("B", &priv_b.sk_kyber),
+        ("C", &priv_c.sk_kyber),
+    ] {
         let pt = decrypt(&wire, kid, sk, &allowed).unwrap();
         assert_eq!(pt, msg);
     }

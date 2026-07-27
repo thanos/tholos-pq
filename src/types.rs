@@ -118,9 +118,10 @@ pub fn to_cbor_canonical<T: serde::Serialize>(v: &T) -> Result<Vec<u8>, crate::T
     let mut buf = Vec::new();
     let mut ser = serde_cbor::ser::Serializer::new(&mut buf);
     let _ = ser.self_describe(); // attach CBOR self-describe tag for robustness
-    // Note: serde_cbor doesn't have a canonical() method, but the default serialization
-    // should be deterministic for our use case
-    v.serialize(&mut ser).map_err(|e| crate::TholosError::Ser(e.to_string()))?;
+                                 // Note: serde_cbor doesn't have a canonical() method, but the default serialization
+                                 // should be deterministic for our use case
+    v.serialize(&mut ser)
+        .map_err(|e| crate::TholosError::Ser(e.to_string()))?;
     Ok(buf)
 }
 
@@ -136,4 +137,3 @@ pub fn to_cbor_canonical<T: serde::Serialize>(v: &T) -> Result<Vec<u8>, crate::T
 pub fn from_cbor<T: serde::de::DeserializeOwned>(data: &[u8]) -> Result<T, crate::TholosError> {
     serde_cbor::from_slice::<T>(data).map_err(|e| crate::TholosError::Ser(e.to_string()))
 }
-
